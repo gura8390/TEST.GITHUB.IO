@@ -104,8 +104,30 @@
         'use strict';
         var sharedEncoder = new TextEncoder();
 
-        // ---- Header Parser (v2 format) ----
+        // ---- Header Parser (v2 text + v3 binary) ----
         function parseHeader(payload) {
+            // v3 binary: starts with "v3" (0x76 0x33), 13 bytes total
+            if (payload.length >= 13 && payload.charCodeAt(0) === 0x76 && payload.charCodeAt(1) === 0x33) {
+                var flags = payload.charCodeAt(2);
+                var pn = payload.charCodeAt(3) | (payload.charCodeAt(4) << 8);
+                var tp = payload.charCodeAt(5) | (payload.charCodeAt(6) << 8);
+                var tc = payload.charCodeAt(7) | (payload.charCodeAt(8) << 8)
+                       | (payload.charCodeAt(9) << 16) | (payload.charCodeAt(10) << 24);
+                var fk = payload.charCodeAt(12);
+                var type = (flags >> 6) & 0x03;  // 01=data, 10=parity
+                return {
+                    partNum: pn,
+                    totalParts: tp,
+                    totalChars: tc,
+                    chunkBytes: payload.length - 13,
+                    compressed: (flags & 0x01) === 1,
+                    parityCount: (flags >> 1) & 0x1F,
+                    dataFrames: fk,
+                    isData: type === 1,
+                    body: payload.substring(13)
+                };
+            }
+            // v2 text fallback
             var match = payload.match(/^v2\[(\d+)\/(\d+)\]t:(\d+)\|c:(\d+)\|z:(\d+)\|r:(\d+)\|f:(\d+)\n/);
             if (!match) return null;
             return {
@@ -116,6 +138,7 @@
                 compressed: parseInt(match[5], 10) === 1,
                 parityCount: parseInt(match[6], 10),
                 dataFrames: parseInt(match[7], 10),
+                isData: true,
                 body: payload.substring(match[0].length)
             };
         }
@@ -247,15 +270,18 @@
             onNewFrameScanned(parsed.partNum);
             updateProgress();
 
-            // Check if we can assemble
-            if (totalParts && collectedCount >= totalParts) {
-                assembleAndShow();
-            } else if (dataFrames && parityCount > 0) {
+            // ★ D2: 数据帧优先 — 收到所有数据帧即可组装（无需等校验帧）
+            if (dataFrames && parityCount > 0) {
                 var haveData = 0;
                 for (var i = 1; i <= dataFrames; i++) { if (collected[i]) haveData++; }
                 if (haveData >= dataFrames) {
                     assembleAndShow();
+                    return;
                 }
+            }
+            // Fallback: 收到所有帧时组装
+            if (totalParts && collectedCount >= totalParts) {
+                assembleAndShow();
             }
         }
 
@@ -395,6 +421,14 @@
                 chunks.push(collected[i]);
                 totalByteLen += collected[i].length;
             }
+            // Debug: show chunk details
+            dbg('组装: k=' + k + ' 数据帧长度: ' + chunks.map(function(c){return c.length;}).join(','));
+            // Show first chunk's first 20 bytes as hex
+            if (chunks[0]) {
+                var hex0 = '';
+                for (var di = 0; di < Math.min(20, chunks[0].length); di++) hex0 += ('0' + chunks[0][di].toString(16)).slice(-2) + ' ';
+                dbg('帧#1前20字节: ' + hex0);
+            }
             var combined = new Uint8Array(totalByteLen);
             var offset = 0;
             for (var i = 0; i < chunks.length; i++) {
@@ -404,6 +438,11 @@
 
             // Decompress with SHA-256 integrity verification
             setStatus('SHA-256 校验中...');
+            dbg('combined: ' + combined.length + '字节');
+            // Show combined's first 40 bytes (should be SHA-256 hash + start of gzip)
+            var combHex = '';
+            for (var ci = 0; ci < Math.min(40, combined.length); ci++) combHex += ('0' + combined[ci].toString(16)).slice(-2) + ' ';
+            dbg('combined前40字节: ' + combHex);
 
             var decompressAndShow = function(finalText) {
                 // Show result
@@ -437,6 +476,18 @@
 
                 crypto.subtle.digest('SHA-256', compressedData).then(function(hashBuffer) {
                     var actualHash = new Uint8Array(hashBuffer);
+                    // Debug: show hash comparison
+                    var expHex = '', actHex = '', firstDiff = -1;
+                    for (var hi = 0; hi < 32; hi++) {
+                        expHex += ('0' + expectedHash[hi].toString(16)).slice(-2);
+                        actHex += ('0' + actualHash[hi].toString(16)).slice(-2);
+                        if (expectedHash[hi] !== actualHash[hi] && firstDiff < 0) firstDiff = hi;
+                    }
+                    dbg('期望hash: ' + expHex.substring(0, 16) + '...');
+                    dbg('实际hash: ' + actHex.substring(0, 16) + '...');
+                    if (firstDiff >= 0) {
+                        dbg('首个差异: byte[' + firstDiff + '] 期望=' + expectedHash[firstDiff].toString(16) + ' 实际=' + actualHash[firstDiff].toString(16), 'err');
+                    }
                     // Compare hashes
                     var match = true;
                     for (var hi = 0; hi < 32; hi++) {
