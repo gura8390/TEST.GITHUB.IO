@@ -53,11 +53,6 @@
         .result-actions { margin-top: 12px; display: flex; gap: 12px; }
         .toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px); background: #333; color: #fff; padding: 10px 24px; border-radius: 6px; font-size: 14px; z-index: 9999; transition: transform 0.3s; pointer-events: none; }
         .toast.show { transform: translateX(-50%) translateY(0); }
-        .debug-panel { background: #1a1a2e; color: #a0ffa0; font-family: var(--font-mono); font-size: 11px; padding: 10px; border-radius: 6px; margin-top: 12px; max-height: 200px; overflow-y: auto; line-height: 1.5; display: none; }
-        .debug-panel.active { display: block; }
-        .debug-panel .err { color: #ff6b6b; }
-        .debug-panel .ok { color: #4caf50; }
-        .debug-panel .warn { color: #ff9800; }
         @media (max-width: 480px) { body { padding: 12px; } h1 { font-size: 18px; } }
     </style>
 </head>
@@ -89,12 +84,6 @@
         </div>
     </div>
     <div class="toast" id="toast"></div>
-    <div class="section">
-        <div class="controls">
-            <button class="btn btn-secondary" id="btnDebug" onclick="document.getElementById('debugPanel').classList.toggle('active')">调试日志</button>
-        </div>
-        <div class="debug-panel" id="debugPanel"></div>
-    </div>
 
     <script src="jsQR.js"></script>
     <script src="pako.min.js"></script>
@@ -106,7 +95,6 @@
 
         // ---- Header Parser (v2 text + v3 binary) ----
         function parseHeader(payload) {
-            // v3 binary: starts with "v3" (0x76 0x33), 13 bytes total
             if (payload.length >= 13 && payload.charCodeAt(0) === 0x76 && payload.charCodeAt(1) === 0x33) {
                 var flags = payload.charCodeAt(2);
                 var pn = payload.charCodeAt(3) | (payload.charCodeAt(4) << 8);
@@ -114,78 +102,54 @@
                 var tc = payload.charCodeAt(7) | (payload.charCodeAt(8) << 8)
                        | (payload.charCodeAt(9) << 16) | (payload.charCodeAt(10) << 24);
                 var fk = payload.charCodeAt(12);
-                var type = (flags >> 6) & 0x03;  // 01=data, 10=parity
+                var type = (flags >> 6) & 0x03;
                 return {
-                    partNum: pn,
-                    totalParts: tp,
-                    totalChars: tc,
+                    partNum: pn, totalParts: tp, totalChars: tc,
                     chunkBytes: payload.length - 13,
                     compressed: (flags & 0x01) === 1,
                     parityCount: (flags >> 1) & 0x1F,
-                    dataFrames: fk,
-                    isData: type === 1,
+                    dataFrames: fk, isData: type === 1,
                     body: payload.substring(13)
                 };
             }
-            // v2 text fallback
             var match = payload.match(/^v2\[(\d+)\/(\d+)\]t:(\d+)\|c:(\d+)\|z:(\d+)\|r:(\d+)\|f:(\d+)\n/);
             if (!match) return null;
             return {
-                partNum: parseInt(match[1], 10),
-                totalParts: parseInt(match[2], 10),
-                totalChars: parseInt(match[3], 10),
-                chunkBytes: parseInt(match[4], 10),
+                partNum: parseInt(match[1], 10), totalParts: parseInt(match[2], 10),
+                totalChars: parseInt(match[3], 10), chunkBytes: parseInt(match[4], 10),
                 compressed: parseInt(match[5], 10) === 1,
-                parityCount: parseInt(match[6], 10),
-                dataFrames: parseInt(match[7], 10),
-                isData: true,
-                body: payload.substring(match[0].length)
+                parityCount: parseInt(match[6], 10), dataFrames: parseInt(match[7], 10),
+                isData: true, body: payload.substring(match[0].length)
             };
         }
 
         // ---- State ----
-        var video = null;
-        var scanCanvas = null;
-        var scanCtx = null;
-        var processCanvas = null;
-        var processCtx = null;
+        var video = null, scanCanvas = null, scanCtx = null;
+        var processCanvas = null, processCtx = null;
         var PROCESS_WIDTH = 1280;
-        var collected = {};
-        var collectedCount = 0;
-        var totalParts = null;
-        var expectedTotalChars = null;
-        var isCompressed = false;
-        var parityCount = 0;
-        var dataFrames = null;
+        var collected = {}, collectedCount = 0;
+        var totalParts = null, expectedTotalChars = null;
+        var isCompressed = false, parityCount = 0, dataFrames = null;
         var isScanning = false;
-        var scanCount = 0;
-        var detectCount = 0;
-        var parseOkCount = 0;
-        var parseFailCount = 0;
-        var lastDebugTime = 0;
 
         // ---- UI Helpers ----
         function showToast(msg) {
             var t = document.getElementById('toast');
-            t.textContent = msg;
-            t.classList.add('show');
+            t.textContent = msg; t.classList.add('show');
             setTimeout(function() { t.classList.remove('show'); }, 2500);
         }
-
-        function setStatus(text) {
-            document.getElementById('statusText').textContent = text;
-        }
+        function setStatus(text) { document.getElementById('statusText').textContent = text; }
 
         function updateProgress() {
             var pct = totalParts ? Math.round((collectedCount / totalParts) * 100) : 0;
             document.getElementById('progressFill').style.width = pct + '%';
-            var progressInfo = collectedCount + (totalParts ? ' / ' + totalParts : '');
+            var info = collectedCount + (totalParts ? ' / ' + totalParts : '');
             if (dataFrames && parityCount > 0) {
                 var have = 0;
                 for (var i = 1; i <= dataFrames; i++) { if (collected[i]) have++; }
-                progressInfo += '  (数据:' + have + '/' + dataFrames + ')';
+                info += '  (数据:' + have + '/' + dataFrames + ')';
             }
-            document.getElementById('progressText').textContent = progressInfo;
+            document.getElementById('progressText').textContent = info;
             updateChunkGrid();
         }
 
@@ -198,40 +162,28 @@
                 var cls = 'chunk-tag';
                 if (collected[i]) cls += ' collected';
                 else if (dataFrames && i > dataFrames) cls += ' parity';
-                span.className = cls;
-                span.textContent = i;
+                span.className = cls; span.textContent = i;
                 grid.appendChild(span);
             }
         }
 
-        function onNewFrameScanned(partNum) {
+        function onNewFrameScanned() {
             var overlay = document.getElementById('scanOverlay');
             overlay.classList.add('flash');
             setTimeout(function() { overlay.classList.remove('flash'); }, 200);
             if (navigator.vibrate) navigator.vibrate(50);
         }
 
-        // ---- Convert QR body string to Uint8Array ----
         function bodyToBytes(body) {
             var bytes = new Uint8Array(body.length);
-            for (var i = 0; i < body.length; i++) {
-                bytes[i] = body.charCodeAt(i) & 0xFF;
-            }
+            for (var i = 0; i < body.length; i++) bytes[i] = body.charCodeAt(i) & 0xFF;
             return bytes;
         }
 
-        // ---- Debug Logging ----
-        var debugPanel = null;
-        function dbg(msg, cls) {
-            if (!debugPanel) debugPanel = document.getElementById('debugPanel');
-            if (!debugPanel) return;
-            var line = document.createElement('div');
-            if (cls) line.className = cls;
-            line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-            debugPanel.appendChild(line);
-            debugPanel.scrollTop = debugPanel.scrollHeight;
-            // Keep last 100 lines
-            while (debugPanel.children.length > 100) debugPanel.removeChild(debugPanel.firstChild);
+        function binaryDataToString(bytes) {
+            var s = '';
+            for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+            return s;
         }
 
         // ---- Scanner Init ----
@@ -240,131 +192,56 @@
             scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
             processCanvas = document.createElement('canvas');
             processCtx = processCanvas.getContext('2d', { willReadFrequently: true });
-
             var vw = video.videoWidth || 640;
             var vh = video.videoHeight || 480;
-            scanCanvas.width = vw;
-            scanCanvas.height = vh;
-            var scale = PROCESS_WIDTH / vw;
+            scanCanvas.width = vw; scanCanvas.height = vh;
             processCanvas.width = PROCESS_WIDTH;
-            processCanvas.height = Math.round(vh * scale);
-
-            dbg('摄像头就绪: ' + vw + 'x' + vh + ' → 处理尺寸: ' + processCanvas.width + 'x' + processCanvas.height, 'ok');
-            dbg('jsQR 可用: ' + (typeof jsQR === 'function' ? '✓' : '✗'), typeof jsQR === 'function' ? 'ok' : 'err');
+            processCanvas.height = Math.round(vh * (PROCESS_WIDTH / vw));
         }
 
         // ---- Core: onFrameDecoded ----
         function onFrameDecoded(parsed) {
-            if (parsed.partNum < 1) return;
-            if (collected[parsed.partNum]) return;
-
+            if (parsed.partNum < 1 || collected[parsed.partNum]) return;
             collected[parsed.partNum] = bodyToBytes(parsed.body);
             collectedCount++;
-
             if (!totalParts || parsed.totalParts > totalParts) totalParts = parsed.totalParts;
             if (parsed.totalChars > 0) expectedTotalChars = parsed.totalChars;
             if (parsed.compressed) isCompressed = true;
             if (parsed.parityCount > 0) parityCount = parsed.parityCount;
             if (parsed.dataFrames > 0) dataFrames = parsed.dataFrames;
-
-            onNewFrameScanned(parsed.partNum);
+            onNewFrameScanned();
             updateProgress();
 
-            // ★ D2: 数据帧优先 — 收到所有数据帧即可组装（无需等校验帧）
             if (dataFrames && parityCount > 0) {
                 var haveData = 0;
                 for (var i = 1; i <= dataFrames; i++) { if (collected[i]) haveData++; }
-                if (haveData >= dataFrames) {
-                    assembleAndShow();
-                    return;
-                }
+                if (haveData >= dataFrames) { assembleAndShow(); return; }
             }
-            // Fallback: 收到所有帧时组装
-            if (totalParts && collectedCount >= totalParts) {
-                assembleAndShow();
-            }
-        }
-
-        // ---- 将 jsQR 的 binaryData (字节数组) 还原为 Latin-1 字符串 ----
-        function binaryDataToString(bytes) {
-            var s = '';
-            for (var i = 0; i < bytes.length; i++) {
-                s += String.fromCharCode(bytes[i]);
-            }
-            return s;
+            if (totalParts && collectedCount >= totalParts) assembleAndShow();
         }
 
         // ---- Scan Loop ----
         function scanFrame() {
             if (!isScanning) return;
             if (video.readyState >= video.HAVE_ENOUGH_DATA) {
-                scanCount++;
                 scanCtx.drawImage(video, 0, 0);
                 processCtx.drawImage(scanCanvas, 0, 0, processCanvas.width, processCanvas.height);
                 var imageData = processCtx.getImageData(0, 0, processCanvas.width, processCanvas.height);
                 try {
-                    var result = jsQR(imageData.data, imageData.width, processCanvas.height, {
-                        inversionAttempts: 'attemptBoth'
-                    });
+                    var result = jsQR(imageData.data, imageData.width, processCanvas.height, { inversionAttempts: 'attemptBoth' });
                     if (result) {
-                        detectCount++;
-                        // ★ 关键修复: 用 binaryData (原始字节) 而非 data (UTF-8解码后的文本)
                         var rawText = '';
-                        var usedSource = '';
                         if (result.binaryData && result.binaryData.length > 0) {
                             rawText = binaryDataToString(result.binaryData);
-                            usedSource = 'binaryData(' + result.binaryData.length + ')';
                         } else if (result.data) {
                             rawText = result.data;
-                            usedSource = 'data(' + result.data.length + ')';
                         }
                         if (rawText) {
                             var parsed = parseHeader(rawText);
-                            if (parsed && parsed.partNum >= 1) {
-                                parseOkCount++;
-                                dbg('✓ 帧#' + parsed.partNum + '/' + parsed.totalParts + ' 已接收 (累计' + collectedCount + '帧)', 'ok');
-                                onFrameDecoded(parsed);
-                            } else {
-                                parseFailCount++;
-                                if (parseFailCount <= 5 || parseFailCount % 50 === 0) {
-                                    var hexPreview = '';
-                                    for (var hi = 0; hi < Math.min(20, rawText.length); hi++) {
-                                        hexPreview += ('0' + rawText.charCodeAt(hi).toString(16)).slice(-2) + ' ';
-                                    }
-                                    dbg('✗ header解析失败 src=' + usedSource + ' len=' + rawText.length + ' hex=' + hexPreview, 'warn');
-                                    // Also show binaryData raw if available
-                                    if (result.binaryData && result.binaryData.length > 0) {
-                                        var bdHex = '';
-                                        for (var hi = 0; hi < Math.min(20, result.binaryData.length); hi++) {
-                                            bdHex += ('0' + result.binaryData[hi].toString(16)).slice(-2) + ' ';
-                                        }
-                                        dbg('  binaryData: ' + bdHex, 'warn');
-                                    }
-                                    if (result.data) {
-                                        dbg('  data: "' + result.data.substring(0, 30).replace(/\n/g,'\\n') + '"', 'warn');
-                                    }
-                                }
-                            }
+                            if (parsed && parsed.partNum >= 1) onFrameDecoded(parsed);
                         }
                     }
-                } catch (e) {
-                    dbg('jsQR 异常: ' + e.message, 'err');
-                }
-
-                // 定期输出调试统计
-                var now = Date.now();
-                if (now - lastDebugTime > 3000) {
-                    lastDebugTime = now;
-                    if (scanCount > 0) {
-                        dbg('扫描统计: 处理' + scanCount + '帧 | QR检测' + detectCount + '次 | 解析成功' + parseOkCount + '次 | 解析失败' + parseFailCount + '次');
-                    }
-                    scanCount = 0; detectCount = 0; parseOkCount = 0; parseFailCount = 0;
-                }
-            } else {
-                if (!scanFrame._waitLogged) {
-                    dbg('等待视频数据... readyState=' + video.readyState, 'warn');
-                    scanFrame._waitLogged = true;
-                }
+                } catch (e) { /* jsQR error, skip frame */ }
             }
             requestAnimationFrame(scanFrame);
         }
@@ -376,19 +253,13 @@
             var n = totalParts || k;
 
             var allPresent = true;
-            for (var i = 1; i <= n; i++) {
-                if (!collected[i]) { allPresent = false; break; }
-            }
+            for (var i = 1; i <= n; i++) { if (!collected[i]) { allPresent = false; break; } }
 
             if (!allPresent && r > 0 && k > 0) {
                 setStatus('RS纠错恢复中...');
-                var shards = new Array(n);
-                var avail = [];
+                var shards = new Array(n), avail = [];
                 for (var i = 0; i < n; i++) {
-                    if (collected[i + 1]) {
-                        shards[i] = collected[i + 1];
-                        avail.push(i);
-                    }
+                    if (collected[i + 1]) { shards[i] = collected[i + 1]; avail.push(i); }
                 }
                 if (avail.length < k) {
                     setStatus('已收到 ' + collectedCount + '/' + n + ' 帧，还需 ' + (k - avail.length) + ' 帧数据');
@@ -396,21 +267,9 @@
                 }
                 try {
                     var recovered = RS.decode(shards, avail, k);
-                    for (var i = 0; i < n; i++) {
-                        if (recovered[i]) collected[i + 1] = recovered[i];
-                    }
-                    var ok = true;
-                    for (var i = 1; i <= k; i++) {
-                        if (!collected[i]) { ok = false; break; }
-                    }
-                    if (!ok) {
-                        setStatus('RS纠错失败，继续扫描...');
-                        return;
-                    }
-                } catch (e) {
-                    setStatus('RS纠错出错: ' + e.message);
-                    return;
-                }
+                    for (var i = 0; i < n; i++) { if (recovered[i]) collected[i + 1] = recovered[i]; }
+                    for (var i = 1; i <= k; i++) { if (!collected[i]) { setStatus('RS纠错失败，继续扫描...'); return; } }
+                } catch (e) { setStatus('RS纠错出错: ' + e.message); return; }
             } else if (!allPresent) {
                 var missing = [];
                 for (var i = 1; i <= n; i++) { if (!collected[i]) missing.push(i); }
@@ -418,46 +277,18 @@
                 return;
             }
 
-            // Stop camera
             isScanning = false;
             var stream = video.srcObject;
-            if (stream) {
-                stream.getTracks().forEach(function(t) { t.stop(); });
-                video.srcObject = null;
-            }
+            if (stream) { stream.getTracks().forEach(function(t) { t.stop(); }); video.srcObject = null; }
 
-            // Concatenate data frames (first k frames)
-            var chunks = [];
-            var totalByteLen = 0;
-            for (var i = 1; i <= k; i++) {
-                chunks.push(collected[i]);
-                totalByteLen += collected[i].length;
-            }
-            // Debug: show chunk details
-            dbg('组装: k=' + k + ' 数据帧长度: ' + chunks.map(function(c){return c.length;}).join(','));
-            // Show first chunk's first 20 bytes as hex
-            if (chunks[0]) {
-                var hex0 = '';
-                for (var di = 0; di < Math.min(20, chunks[0].length); di++) hex0 += ('0' + chunks[0][di].toString(16)).slice(-2) + ' ';
-                dbg('帧#1前20字节: ' + hex0);
-            }
-            var combined = new Uint8Array(totalByteLen);
-            var offset = 0;
-            for (var i = 0; i < chunks.length; i++) {
-                combined.set(chunks[i], offset);
-                offset += chunks[i].length;
-            }
+            var chunks = [], totalByteLen = 0;
+            for (var i = 1; i <= k; i++) { chunks.push(collected[i]); totalByteLen += collected[i].length; }
+            var combined = new Uint8Array(totalByteLen), offset = 0;
+            for (var i = 0; i < chunks.length; i++) { combined.set(chunks[i], offset); offset += chunks[i].length; }
 
-            // Decompress with SHA-256 integrity verification
             setStatus('SHA-256 校验中...');
-            dbg('combined: ' + combined.length + '字节');
-            // Show combined's first 40 bytes (should be SHA-256 hash + start of gzip)
-            var combHex = '';
-            for (var ci = 0; ci < Math.min(40, combined.length); ci++) combHex += ('0' + combined[ci].toString(16)).slice(-2) + ' ';
-            dbg('combined前40字节: ' + combHex);
 
             var decompressAndShow = function(finalText) {
-                // Show result
                 var statusEl = document.getElementById('statusText');
                 if (expectedTotalChars && finalText.length !== expectedTotalChars) {
                     statusEl.textContent = '⚠️ 字数不匹配：预期 ' + expectedTotalChars + '，实际 ' + finalText.length;
@@ -468,64 +299,30 @@
                     statusEl.textContent = msg;
                     statusEl.style.color = 'var(--color-success)';
                 }
-
                 document.getElementById('resultText').value = finalText;
                 document.getElementById('charResult').textContent = finalText.length.toLocaleString();
                 document.getElementById('byteResult').textContent = sharedEncoder.encode(finalText).length.toLocaleString();
                 document.getElementById('resultSection').classList.add('active');
-
                 if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]);
             };
 
             if (isCompressed) {
-                // Extract SHA-256 hash (first 32 bytes) and compressed data (rest)
-                if (combined.length < 33) {
-                    setStatus('⚠️ 数据过短，无法提取 SHA-256 校验');
-                    return;
-                }
+                if (combined.length < 33) { setStatus('⚠️ 数据过短，无法提取 SHA-256 校验'); return; }
                 var expectedHash = combined.slice(0, 32);
                 var compressedData = combined.slice(32);
-
                 crypto.subtle.digest('SHA-256', compressedData).then(function(hashBuffer) {
                     var actualHash = new Uint8Array(hashBuffer);
-                    // Debug: show hash comparison
-                    var expHex = '', actHex = '', firstDiff = -1;
-                    for (var hi = 0; hi < 32; hi++) {
-                        expHex += ('0' + expectedHash[hi].toString(16)).slice(-2);
-                        actHex += ('0' + actualHash[hi].toString(16)).slice(-2);
-                        if (expectedHash[hi] !== actualHash[hi] && firstDiff < 0) firstDiff = hi;
-                    }
-                    dbg('期望hash: ' + expHex.substring(0, 16) + '...');
-                    dbg('实际hash: ' + actHex.substring(0, 16) + '...');
-                    if (firstDiff >= 0) {
-                        dbg('首个差异: byte[' + firstDiff + '] 期望=' + expectedHash[firstDiff].toString(16) + ' 实际=' + actualHash[firstDiff].toString(16), 'err');
-                    }
-                    // Compare hashes
                     var match = true;
-                    for (var hi = 0; hi < 32; hi++) {
-                        if (expectedHash[hi] !== actualHash[hi]) { match = false; break; }
-                    }
-                    if (!match) {
-                        setStatus('⚠️ SHA-256 校验失败！数据可能已损坏');
-                        return;
-                    }
+                    for (var hi = 0; hi < 32; hi++) { if (expectedHash[hi] !== actualHash[hi]) { match = false; break; } }
+                    if (!match) { setStatus('⚠️ SHA-256 校验失败！数据可能已损坏'); return; }
                     try {
                         var decompressed = pako.ungzip(compressedData);
-                        var finalText = new TextDecoder('utf-8').decode(decompressed);
-                        decompressAndShow(finalText);
-                    } catch (e) {
-                        setStatus('⚠️ 解压/解码失败: ' + e.message);
-                    }
-                }).catch(function(e) {
-                    setStatus('⚠️ SHA-256 校验出错: ' + e.message);
-                });
+                        decompressAndShow(new TextDecoder('utf-8').decode(decompressed));
+                    } catch (e) { setStatus('⚠️ 解压/解码失败: ' + e.message); }
+                }).catch(function(e) { setStatus('⚠️ SHA-256 校验出错: ' + e.message); });
             } else {
-                try {
-                    var finalText = new TextDecoder('utf-8').decode(combined);
-                    decompressAndShow(finalText);
-                } catch (e) {
-                    setStatus('⚠️ 解码失败: ' + e.message);
-                }
+                try { decompressAndShow(new TextDecoder('utf-8').decode(combined)); }
+                catch (e) { setStatus('⚠️ 解码失败: ' + e.message); }
             }
         }
 
@@ -536,8 +333,7 @@
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(text).then(function() { showToast('已复制到剪贴板'); });
             } else {
-                var ta = document.getElementById('resultText');
-                ta.select();
+                document.getElementById('resultText').select();
                 document.execCommand('copy');
                 showToast('已复制到剪贴板');
             }
@@ -553,36 +349,24 @@
                 video.srcObject = stream;
                 video.setAttribute('playsinline', 'true');
                 video.play().then(function() {
-                    initScanner();
-                    isScanning = true;
+                    initScanner(); isScanning = true;
                     setStatus('扫描中... 请将摄像头对准电脑屏幕');
                     requestAnimationFrame(scanFrame);
                 });
             }).catch(function(err) {
-                if (err.name === 'NotAllowedError') {
-                    setStatus('❌ 摄像头权限被拒绝，请允许后刷新');
-                } else if (err.name === 'NotFoundError') {
-                    setStatus('❌ 未找到摄像头');
-                } else {
-                    setStatus('❌ 摄像头错误：' + err.message);
-                }
+                if (err.name === 'NotAllowedError') setStatus('❌ 摄像头权限被拒绝，请允许后刷新');
+                else if (err.name === 'NotFoundError') setStatus('❌ 未找到摄像头');
+                else setStatus('❌ 摄像头错误：' + err.message);
             });
         }
 
         // ---- Reset ----
         function resetScanner() {
             isScanning = false;
-            if (video && video.srcObject) {
-                video.srcObject.getTracks().forEach(function(t) { t.stop(); });
-                video.srcObject = null;
-            }
-            collected = {};
-            collectedCount = 0;
-            totalParts = null;
-            expectedTotalChars = null;
-            isCompressed = false;
-            parityCount = 0;
-            dataFrames = null;
+            if (video && video.srcObject) { video.srcObject.getTracks().forEach(function(t) { t.stop(); }); video.srcObject = null; }
+            collected = {}; collectedCount = 0;
+            totalParts = null; expectedTotalChars = null;
+            isCompressed = false; parityCount = 0; dataFrames = null;
             document.getElementById('progressFill').style.width = '0%';
             document.getElementById('progressText').textContent = '0';
             document.getElementById('chunkGrid').innerHTML = '';
@@ -595,14 +379,11 @@
         // ---- Init ----
         document.addEventListener('DOMContentLoaded', function() {
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                setStatus('❌ 当前浏览器不支持摄像头');
-                return;
+                setStatus('❌ 当前浏览器不支持摄像头'); return;
             }
             document.getElementById('btnCopy').addEventListener('click', copyText);
             document.getElementById('btnReset').addEventListener('click', resetScanner);
             startCamera();
-
-            // Register Service Worker for PWA offline support
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('./sw.js').catch(function() {});
             }
