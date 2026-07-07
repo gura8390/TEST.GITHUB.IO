@@ -53,6 +53,11 @@
         .result-actions { margin-top: 12px; display: flex; gap: 12px; }
         .toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px); background: #333; color: #fff; padding: 10px 24px; border-radius: 6px; font-size: 14px; z-index: 9999; transition: transform 0.3s; pointer-events: none; }
         .toast.show { transform: translateX(-50%) translateY(0); }
+        .debug-panel { background: #1a1a2e; color: #a0ffa0; font-family: var(--font-mono); font-size: 11px; padding: 10px; border-radius: 6px; margin-top: 12px; max-height: 200px; overflow-y: auto; line-height: 1.5; display: none; }
+        .debug-panel.active { display: block; }
+        .debug-panel .err { color: #ff6b6b; }
+        .debug-panel .ok { color: #4caf50; }
+        .debug-panel .warn { color: #ff9800; }
         @media (max-width: 480px) { body { padding: 12px; } h1 { font-size: 18px; } }
     </style>
 </head>
@@ -84,6 +89,12 @@
         </div>
     </div>
     <div class="toast" id="toast"></div>
+    <div class="section">
+        <div class="controls">
+            <button class="btn btn-secondary" id="btnDebug" onclick="document.getElementById('debugPanel').classList.toggle('active')">调试日志</button>
+        </div>
+        <div class="debug-panel" id="debugPanel"></div>
+    </div>
 
     <script src="jsQR.js"></script>
     <script src="pako.min.js"></script>
@@ -115,7 +126,7 @@
         var scanCtx = null;
         var processCanvas = null;
         var processCtx = null;
-        var PROCESS_WIDTH = 640;
+        var PROCESS_WIDTH = 1280;
         var collected = {};
         var collectedCount = 0;
         var totalParts = null;
@@ -124,6 +135,11 @@
         var parityCount = 0;
         var dataFrames = null;
         var isScanning = false;
+        var scanCount = 0;
+        var detectCount = 0;
+        var parseOkCount = 0;
+        var parseFailCount = 0;
+        var lastDebugTime = 0;
 
         // ---- UI Helpers ----
         function showToast(msg) {
@@ -181,17 +197,37 @@
             return bytes;
         }
 
+        // ---- Debug Logging ----
+        var debugPanel = null;
+        function dbg(msg, cls) {
+            if (!debugPanel) debugPanel = document.getElementById('debugPanel');
+            if (!debugPanel) return;
+            var line = document.createElement('div');
+            if (cls) line.className = cls;
+            line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+            debugPanel.appendChild(line);
+            debugPanel.scrollTop = debugPanel.scrollHeight;
+            // Keep last 100 lines
+            while (debugPanel.children.length > 100) debugPanel.removeChild(debugPanel.firstChild);
+        }
+
         // ---- Scanner Init ----
         function initScanner() {
             scanCanvas = document.createElement('canvas');
             scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
             processCanvas = document.createElement('canvas');
             processCtx = processCanvas.getContext('2d', { willReadFrequently: true });
-            scanCanvas.width = video.videoWidth;
-            scanCanvas.height = video.videoHeight;
-            var scale = PROCESS_WIDTH / video.videoWidth;
+
+            var vw = video.videoWidth || 640;
+            var vh = video.videoHeight || 480;
+            scanCanvas.width = vw;
+            scanCanvas.height = vh;
+            var scale = PROCESS_WIDTH / vw;
             processCanvas.width = PROCESS_WIDTH;
-            processCanvas.height = Math.round(video.videoHeight * scale);
+            processCanvas.height = Math.round(vh * scale);
+
+            dbg('摄像头就绪: ' + vw + 'x' + vh + ' → 处理尺寸: ' + processCanvas.width + 'x' + processCanvas.height, 'ok');
+            dbg('jsQR 可用: ' + (typeof jsQR === 'function' ? '✓' : '✗'), typeof jsQR === 'function' ? 'ok' : 'err');
         }
 
         // ---- Core: onFrameDecoded ----
@@ -223,21 +259,73 @@
             }
         }
 
+        // ---- 将 jsQR 的 binaryData (字节数组) 还原为 Latin-1 字符串 ----
+        function binaryDataToString(bytes) {
+            var s = '';
+            for (var i = 0; i < bytes.length; i++) {
+                s += String.fromCharCode(bytes[i]);
+            }
+            return s;
+        }
+
         // ---- Scan Loop ----
         function scanFrame() {
             if (!isScanning) return;
             if (video.readyState >= video.HAVE_ENOUGH_DATA) {
+                scanCount++;
                 scanCtx.drawImage(video, 0, 0);
                 processCtx.drawImage(scanCanvas, 0, 0, processCanvas.width, processCanvas.height);
                 var imageData = processCtx.getImageData(0, 0, processCanvas.width, processCanvas.height);
-                var result = jsQR(imageData.data, imageData.width, processCanvas.height, {
-                    inversionAttempts: 'attemptBoth'
-                });
-                if (result && result.data) {
-                    var parsed = parseHeader(result.data);
-                    if (parsed && parsed.partNum >= 1) {
-                        onFrameDecoded(parsed);
+                try {
+                    var result = jsQR(imageData.data, imageData.width, processCanvas.height, {
+                        inversionAttempts: 'attemptBoth'
+                    });
+                    if (result) {
+                        detectCount++;
+                        // ★ 关键修复: 用 binaryData (原始字节) 而非 data (UTF-8解码后的文本)
+                        // jsQR 的 decodeByte 对二进制数据做 decodeURIComponent 会丢失字节≥128
+                        var rawText = '';
+                        if (result.binaryData && result.binaryData.length > 0) {
+                            rawText = binaryDataToString(result.binaryData);
+                        } else if (result.data) {
+                            rawText = result.data;
+                        }
+                        if (rawText) {
+                            var parsed = parseHeader(rawText);
+                            if (parsed && parsed.partNum >= 1) {
+                                parseOkCount++;
+                                dbg('✓ 帧#' + parsed.partNum + '/' + parsed.totalParts + ' 已接收 (累计' + collectedCount + '帧)', 'ok');
+                                onFrameDecoded(parsed);
+                            } else {
+                                parseFailCount++;
+                                if (parseFailCount <= 5 || parseFailCount % 50 === 0) {
+                                    var preview = rawText.substring(0, 40);
+                                    var hexPreview = '';
+                                    for (var hi = 0; hi < Math.min(20, rawText.length); hi++) {
+                                        hexPreview += ('0' + rawText.charCodeAt(hi).toString(16)).slice(-2) + ' ';
+                                    }
+                                    dbg('✗ QR已检测但header解析失败 (' + parseFailCount + '次): hex=' + hexPreview + ' text="' + preview.replace(/\n/g,'\\n') + '"', 'warn');
+                                }
+                            }
+                        }
                     }
+                } catch (e) {
+                    dbg('jsQR 异常: ' + e.message, 'err');
+                }
+
+                // 定期输出调试统计
+                var now = Date.now();
+                if (now - lastDebugTime > 3000) {
+                    lastDebugTime = now;
+                    if (scanCount > 0) {
+                        dbg('扫描统计: 处理' + scanCount + '帧 | QR检测' + detectCount + '次 | 解析成功' + parseOkCount + '次 | 解析失败' + parseFailCount + '次');
+                    }
+                    scanCount = 0; detectCount = 0; parseOkCount = 0; parseFailCount = 0;
+                }
+            } else {
+                if (!scanFrame._waitLogged) {
+                    dbg('等待视频数据... readyState=' + video.readyState, 'warn');
+                    scanFrame._waitLogged = true;
                 }
             }
             requestAnimationFrame(scanFrame);
