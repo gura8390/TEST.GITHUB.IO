@@ -309,12 +309,14 @@
                     if (result) {
                         detectCount++;
                         // ★ 关键修复: 用 binaryData (原始字节) 而非 data (UTF-8解码后的文本)
-                        // jsQR 的 decodeByte 对二进制数据做 decodeURIComponent 会丢失字节≥128
                         var rawText = '';
+                        var usedSource = '';
                         if (result.binaryData && result.binaryData.length > 0) {
                             rawText = binaryDataToString(result.binaryData);
+                            usedSource = 'binaryData(' + result.binaryData.length + ')';
                         } else if (result.data) {
                             rawText = result.data;
+                            usedSource = 'data(' + result.data.length + ')';
                         }
                         if (rawText) {
                             var parsed = parseHeader(rawText);
@@ -325,12 +327,22 @@
                             } else {
                                 parseFailCount++;
                                 if (parseFailCount <= 5 || parseFailCount % 50 === 0) {
-                                    var preview = rawText.substring(0, 40);
                                     var hexPreview = '';
                                     for (var hi = 0; hi < Math.min(20, rawText.length); hi++) {
                                         hexPreview += ('0' + rawText.charCodeAt(hi).toString(16)).slice(-2) + ' ';
                                     }
-                                    dbg('✗ QR已检测但header解析失败 (' + parseFailCount + '次): hex=' + hexPreview + ' text="' + preview.replace(/\n/g,'\\n') + '"', 'warn');
+                                    dbg('✗ header解析失败 src=' + usedSource + ' len=' + rawText.length + ' hex=' + hexPreview, 'warn');
+                                    // Also show binaryData raw if available
+                                    if (result.binaryData && result.binaryData.length > 0) {
+                                        var bdHex = '';
+                                        for (var hi = 0; hi < Math.min(20, result.binaryData.length); hi++) {
+                                            bdHex += ('0' + result.binaryData[hi].toString(16)).slice(-2) + ' ';
+                                        }
+                                        dbg('  binaryData: ' + bdHex, 'warn');
+                                    }
+                                    if (result.data) {
+                                        dbg('  data: "' + result.data.substring(0, 30).replace(/\n/g,'\\n') + '"', 'warn');
+                                    }
                                 }
                             }
                         }
