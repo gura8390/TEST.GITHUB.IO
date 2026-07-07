@@ -1,5 +1,5 @@
-// 动态流式二维码 v2.2 — Service Worker for offline support
-var CACHE_NAME = 'recv-v2.3';
+// 动态流式二维码 v2.3 — Service Worker for offline support
+var CACHE_NAME = 'recv-v2.3.1';
 var ASSETS = [
     './',
     './index.html',

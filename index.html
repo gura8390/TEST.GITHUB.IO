@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#1a73e8">
     <link rel="manifest" href="manifest.json">
-    <title>动态流式二维码 v2.2 — 接收端</title>
+    <title>动态流式二维码 v2.3 — 接收端</title>
     <style>
         :root {
             --color-primary: #1a73e8;
@@ -38,7 +38,6 @@
         .chunk-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
         .chunk-tag { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 28px; border-radius: 4px; font-size: 12px; font-weight: 600; font-family: var(--font-mono); border: 1px solid var(--color-border); background: #f9f9f9; color: var(--color-text-secondary); transition: all 0.2s; }
         .chunk-tag.collected { background: var(--color-success); color: #fff; border-color: var(--color-success); }
-        .chunk-tag.parity { background: #ff9800; color: #fff; border-color: #ff9800; }
         .controls { display: flex; justify-content: center; gap: 12px; margin-top: 12px; }
         .btn { padding: 8px 24px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
         .btn-primary { background: var(--color-primary); color: #fff; }
@@ -57,7 +56,7 @@
     </style>
 </head>
 <body>
-    <h1>&#x1F4F1; 动态流式二维码 v2.2 — 接收端</h1>
+    <h1>&#x1F4F1; 动态流式二维码 v2.3 — 接收端</h1>
     <div class="section">
         <div class="camera-wrap">
             <video id="video" playsinline autoplay muted></video>
@@ -83,44 +82,41 @@
             <button class="btn btn-secondary" id="btnReset">重新扫描</button>
         </div>
     </div>
+    <div class="section result-section" id="fileResultSection">
+        <div class="result-stats">
+            <span>文件：<span class="value" id="fileName">-</span></span>
+            <span>大小：<span class="value" id="fileSize">-</span></span>
+        </div>
+        <div class="result-actions">
+            <button class="btn btn-primary" id="btnDownload">&#x2B07; 下载文件</button>
+            <button class="btn btn-secondary" id="btnReset2">重新扫描</button>
+        </div>
+    </div>
     <div class="toast" id="toast"></div>
 
     <script src="jsQR.js"></script>
     <script src="pako.min.js"></script>
-    <script src="reed-solomon.js"></script>
     <script>
     (function() {
         'use strict';
         var sharedEncoder = new TextEncoder();
 
-        // ---- Header Parser (v2 text + v3 binary) ----
+        // ---- v3 Header Parser ----
         function parseHeader(payload) {
             if (payload.length >= 13 && payload.charCodeAt(0) === 0x76 && payload.charCodeAt(1) === 0x33) {
                 var flags = payload.charCodeAt(2);
-                var pn = payload.charCodeAt(3) | (payload.charCodeAt(4) << 8);
-                var tp = payload.charCodeAt(5) | (payload.charCodeAt(6) << 8);
-                var tc = payload.charCodeAt(7) | (payload.charCodeAt(8) << 8)
-                       | (payload.charCodeAt(9) << 16) | (payload.charCodeAt(10) << 24);
-                var fk = payload.charCodeAt(12);
-                var type = (flags >> 6) & 0x03;
                 return {
-                    partNum: pn, totalParts: tp, totalChars: tc,
+                    partNum: payload.charCodeAt(3) | (payload.charCodeAt(4) << 8),
+                    totalParts: payload.charCodeAt(5) | (payload.charCodeAt(6) << 8),
+                    totalChars: payload.charCodeAt(7) | (payload.charCodeAt(8) << 8)
+                             | (payload.charCodeAt(9) << 16) | (payload.charCodeAt(10) << 24),
                     chunkBytes: payload.length - 13,
                     compressed: (flags & 0x01) === 1,
-                    parityCount: (flags >> 1) & 0x1F,
-                    dataFrames: fk, isData: type === 1,
+                    dataFrames: payload.charCodeAt(12),
                     body: payload.substring(13)
                 };
             }
-            var match = payload.match(/^v2\[(\d+)\/(\d+)\]t:(\d+)\|c:(\d+)\|z:(\d+)\|r:(\d+)\|f:(\d+)\n/);
-            if (!match) return null;
-            return {
-                partNum: parseInt(match[1], 10), totalParts: parseInt(match[2], 10),
-                totalChars: parseInt(match[3], 10), chunkBytes: parseInt(match[4], 10),
-                compressed: parseInt(match[5], 10) === 1,
-                parityCount: parseInt(match[6], 10), dataFrames: parseInt(match[7], 10),
-                isData: true, body: payload.substring(match[0].length)
-            };
+            return null;
         }
 
         // ---- State ----
@@ -129,10 +125,11 @@
         var PROCESS_WIDTH = 1280;
         var collected = {}, collectedCount = 0;
         var totalParts = null, expectedTotalChars = null;
-        var isCompressed = false, parityCount = 0, dataFrames = null;
+        var isCompressed = false, dataFrames = null;
         var isScanning = false;
+        var startTime = 0;
 
-        // ---- UI Helpers ----
+        // ---- UI ----
         function showToast(msg) {
             var t = document.getElementById('toast');
             t.textContent = msg; t.classList.add('show');
@@ -143,13 +140,7 @@
         function updateProgress() {
             var pct = totalParts ? Math.round((collectedCount / totalParts) * 100) : 0;
             document.getElementById('progressFill').style.width = pct + '%';
-            var info = collectedCount + (totalParts ? ' / ' + totalParts : '');
-            if (dataFrames && parityCount > 0) {
-                var have = 0;
-                for (var i = 1; i <= dataFrames; i++) { if (collected[i]) have++; }
-                info += '  (数据:' + have + '/' + dataFrames + ')';
-            }
-            document.getElementById('progressText').textContent = info;
+            document.getElementById('progressText').textContent = collectedCount + (totalParts ? ' / ' + totalParts : '');
             updateChunkGrid();
         }
 
@@ -159,10 +150,8 @@
             var count = totalParts || collectedCount;
             for (var i = 1; i <= count; i++) {
                 var span = document.createElement('span');
-                var cls = 'chunk-tag';
-                if (collected[i]) cls += ' collected';
-                else if (dataFrames && i > dataFrames) cls += ' parity';
-                span.className = cls; span.textContent = i;
+                span.className = 'chunk-tag' + (collected[i] ? ' collected' : '');
+                span.textContent = i;
                 grid.appendChild(span);
             }
         }
@@ -199,24 +188,19 @@
             processCanvas.height = Math.round(vh * (PROCESS_WIDTH / vw));
         }
 
-        // ---- Core: onFrameDecoded ----
+        // ---- onFrameDecoded ----
         function onFrameDecoded(parsed) {
             if (parsed.partNum < 1 || collected[parsed.partNum]) return;
+            if (startTime === 0) startTime = Date.now();
             collected[parsed.partNum] = bodyToBytes(parsed.body);
             collectedCount++;
             if (!totalParts || parsed.totalParts > totalParts) totalParts = parsed.totalParts;
             if (parsed.totalChars > 0) expectedTotalChars = parsed.totalChars;
             if (parsed.compressed) isCompressed = true;
-            if (parsed.parityCount > 0) parityCount = parsed.parityCount;
             if (parsed.dataFrames > 0) dataFrames = parsed.dataFrames;
             onNewFrameScanned();
             updateProgress();
-
-            if (dataFrames && parityCount > 0) {
-                var haveData = 0;
-                for (var i = 1; i <= dataFrames; i++) { if (collected[i]) haveData++; }
-                if (haveData >= dataFrames) { assembleAndShow(); return; }
-            }
+            // 收齐所有帧即可组装
             if (totalParts && collectedCount >= totalParts) assembleAndShow();
         }
 
@@ -231,56 +215,37 @@
                     var result = jsQR(imageData.data, imageData.width, processCanvas.height, { inversionAttempts: 'attemptBoth' });
                     if (result) {
                         var rawText = '';
-                        if (result.binaryData && result.binaryData.length > 0) {
-                            rawText = binaryDataToString(result.binaryData);
-                        } else if (result.data) {
-                            rawText = result.data;
-                        }
+                        if (result.binaryData && result.binaryData.length > 0) rawText = binaryDataToString(result.binaryData);
+                        else if (result.data) rawText = result.data;
                         if (rawText) {
                             var parsed = parseHeader(rawText);
                             if (parsed && parsed.partNum >= 1) onFrameDecoded(parsed);
                         }
                     }
-                } catch (e) { /* jsQR error, skip frame */ }
+                } catch (e) { /* skip */ }
             }
             requestAnimationFrame(scanFrame);
         }
 
-        // ---- Assembly with RS decode + pako ungzip ----
+        // ---- Assembly ----
         function assembleAndShow() {
             var k = dataFrames || totalParts;
-            var r = parityCount || 0;
             var n = totalParts || k;
 
-            var allPresent = true;
-            for (var i = 1; i <= n; i++) { if (!collected[i]) { allPresent = false; break; } }
-
-            if (!allPresent && r > 0 && k > 0) {
-                setStatus('RS纠错恢复中...');
-                var shards = new Array(n), avail = [];
-                for (var i = 0; i < n; i++) {
-                    if (collected[i + 1]) { shards[i] = collected[i + 1]; avail.push(i); }
-                }
-                if (avail.length < k) {
-                    setStatus('已收到 ' + collectedCount + '/' + n + ' 帧，还需 ' + (k - avail.length) + ' 帧数据');
+            // 检查是否收齐
+            for (var i = 1; i <= n; i++) {
+                if (!collected[i]) {
+                    setStatus('已收到 ' + collectedCount + '/' + n + ' 帧，缺少第 ' + i + ' 帧，继续扫描...');
                     return;
                 }
-                try {
-                    var recovered = RS.decode(shards, avail, k);
-                    for (var i = 0; i < n; i++) { if (recovered[i]) collected[i + 1] = recovered[i]; }
-                    for (var i = 1; i <= k; i++) { if (!collected[i]) { setStatus('RS纠错失败，继续扫描...'); return; } }
-                } catch (e) { setStatus('RS纠错出错: ' + e.message); return; }
-            } else if (!allPresent) {
-                var missing = [];
-                for (var i = 1; i <= n; i++) { if (!collected[i]) missing.push(i); }
-                setStatus('缺失第 ' + missing.join(',') + ' 帧，继续扫描...');
-                return;
             }
 
+            // 停止摄像头
             isScanning = false;
             var stream = video.srcObject;
             if (stream) { stream.getTracks().forEach(function(t) { t.stop(); }); video.srcObject = null; }
 
+            // 拼接数据帧
             var chunks = [], totalByteLen = 0;
             for (var i = 1; i <= k; i++) { chunks.push(collected[i]); totalByteLen += collected[i].length; }
             var combined = new Uint8Array(totalByteLen), offset = 0;
@@ -288,26 +253,63 @@
 
             setStatus('SHA-256 校验中...');
 
-            var decompressAndShow = function(finalText) {
+            var formatSize = function(bytes) {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / 1048576).toFixed(1) + ' MB';
+            };
+
+            var decompressAndShow = function(decompressedBytes) {
                 var statusEl = document.getElementById('statusText');
+                var elapsed = startTime > 0 ? (Date.now() - startTime) / 1000 : 0;
+                var totalBytes = combined.length;
+                var speed = elapsed > 0 ? (totalBytes / 1024 / elapsed).toFixed(1) : '-';
+                var summary = '✅ 完成！' + collectedCount + '/' + n + '帧 | '
+                    + (elapsed > 0 ? elapsed.toFixed(1) + '秒' : '-')
+                    + ' | ' + speed + ' KB/s';
+                statusEl.textContent = summary;
+                statusEl.style.color = 'var(--color-success)';
+
+                // 检测文件: 第1字节=文件名长度
+                var nameLen = decompressedBytes[0];
+                if (nameLen > 0 && nameLen < 255 && decompressedBytes.length > 1 + nameLen) {
+                    var nameBytes = decompressedBytes.slice(1, 1 + nameLen);
+                    var fileName = new TextDecoder('utf-8').decode(nameBytes);
+                    if (/^[\x20-\x7E\u4E00-\u9FFF\u3000-\u303F._\-()（）\[\]【】]+/.test(fileName)) {
+                        // 文件模式
+                        var fileContent = decompressedBytes.slice(1 + nameLen);
+                        document.getElementById('fileResultSection').classList.add('active');
+                        document.getElementById('resultSection').classList.remove('active');
+                        document.getElementById('fileName').textContent = fileName;
+                        document.getElementById('fileSize').textContent = formatSize(fileContent.length);
+                        document.getElementById('btnDownload').onclick = function() {
+                            var blob = new Blob([fileContent]);
+                            var url = URL.createObjectURL(blob);
+                            var a = document.createElement('a');
+                            a.href = url; a.download = fileName;
+                            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                        };
+                        if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]);
+                        return;
+                    }
+                }
+                // 文本模式
+                var finalText = new TextDecoder('utf-8').decode(decompressedBytes);
                 if (expectedTotalChars && finalText.length !== expectedTotalChars) {
                     statusEl.textContent = '⚠️ 字数不匹配：预期 ' + expectedTotalChars + '，实际 ' + finalText.length;
                     statusEl.style.color = 'var(--color-warning)';
-                } else {
-                    var msg = '✅ 扫描完成！共 ' + collectedCount + ' 帧';
-                    if (r > 0) msg += ' (RS纠错:' + r + ')';
-                    statusEl.textContent = msg;
-                    statusEl.style.color = 'var(--color-success)';
                 }
                 document.getElementById('resultText').value = finalText;
                 document.getElementById('charResult').textContent = finalText.length.toLocaleString();
                 document.getElementById('byteResult').textContent = sharedEncoder.encode(finalText).length.toLocaleString();
                 document.getElementById('resultSection').classList.add('active');
+                document.getElementById('fileResultSection').classList.remove('active');
                 if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]);
             };
 
             if (isCompressed) {
-                if (combined.length < 33) { setStatus('⚠️ 数据过短，无法提取 SHA-256 校验'); return; }
+                if (combined.length < 33) { setStatus('⚠️ 数据过短'); return; }
                 var expectedHash = combined.slice(0, 32);
                 var compressedData = combined.slice(32);
                 crypto.subtle.digest('SHA-256', compressedData).then(function(hashBuffer) {
@@ -317,11 +319,11 @@
                     if (!match) { setStatus('⚠️ SHA-256 校验失败！数据可能已损坏'); return; }
                     try {
                         var decompressed = pako.ungzip(compressedData);
-                        decompressAndShow(new TextDecoder('utf-8').decode(decompressed));
-                    } catch (e) { setStatus('⚠️ 解压/解码失败: ' + e.message); }
-                }).catch(function(e) { setStatus('⚠️ SHA-256 校验出错: ' + e.message); });
+                        decompressAndShow(decompressed);
+                    } catch (e) { setStatus('⚠️ 解压失败: ' + e.message); }
+                }).catch(function(e) { setStatus('⚠️ SHA-256 出错: ' + e.message); });
             } else {
-                try { decompressAndShow(new TextDecoder('utf-8').decode(combined)); }
+                try { decompressAndShow(combined); }
                 catch (e) { setStatus('⚠️ 解码失败: ' + e.message); }
             }
         }
@@ -354,7 +356,7 @@
                     requestAnimationFrame(scanFrame);
                 });
             }).catch(function(err) {
-                if (err.name === 'NotAllowedError') setStatus('❌ 摄像头权限被拒绝，请允许后刷新');
+                if (err.name === 'NotAllowedError') setStatus('❌ 摄像头权限被拒绝');
                 else if (err.name === 'NotFoundError') setStatus('❌ 未找到摄像头');
                 else setStatus('❌ 摄像头错误：' + err.message);
             });
@@ -366,11 +368,13 @@
             if (video && video.srcObject) { video.srcObject.getTracks().forEach(function(t) { t.stop(); }); video.srcObject = null; }
             collected = {}; collectedCount = 0;
             totalParts = null; expectedTotalChars = null;
-            isCompressed = false; parityCount = 0; dataFrames = null;
+            isCompressed = false; dataFrames = null;
+            startTime = 0;
             document.getElementById('progressFill').style.width = '0%';
             document.getElementById('progressText').textContent = '0';
             document.getElementById('chunkGrid').innerHTML = '';
             document.getElementById('resultSection').classList.remove('active');
+            document.getElementById('fileResultSection').classList.remove('active');
             document.getElementById('resultText').value = '';
             document.getElementById('statusText').style.color = '';
             startCamera();
@@ -383,6 +387,7 @@
             }
             document.getElementById('btnCopy').addEventListener('click', copyText);
             document.getElementById('btnReset').addEventListener('click', resetScanner);
+            document.getElementById('btnReset2').addEventListener('click', resetScanner);
             startCamera();
             if ('serviceWorker' in navigator) {
                 navigator.serviceWorker.register('./sw.js').catch(function() {});
