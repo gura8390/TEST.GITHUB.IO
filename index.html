@@ -1,399 +1,118 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#1a73e8">
-    <link rel="manifest" href="manifest.json">
-    <title>动态流式二维码 v2.3 — 接收端</title>
-    <style>
-        :root {
-            --color-primary: #1a73e8;
-            --color-primary-hover: #1557b0;
-            --color-text: #333333;
-            --color-text-secondary: #666666;
-            --color-bg: #f5f5f5;
-            --color-card-bg: #ffffff;
-            --color-border: #e0e0e0;
-            --color-success: #4caf50;
-            --color-warning: #e94560;
-            --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.1);
-            --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-            --font-mono: "SF Mono", "Cascadia Code", "Consolas", "Liberation Mono", monospace;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: var(--font-sans); color: var(--color-text); background: var(--color-bg); padding: 16px; max-width: 600px; margin: 0 auto; line-height: 1.6; }
-        h1 { text-align: center; font-size: 20px; font-weight: 600; margin-bottom: 16px; }
-        .section { background: var(--color-card-bg); border-radius: 8px; box-shadow: var(--shadow-card); padding: 16px; margin-bottom: 16px; }
-        .camera-wrap { position: relative; width: 100%; background: #000; border-radius: 8px; overflow: hidden; }
-        .camera-wrap video { width: 100%; display: block; border-radius: 8px; }
-        .scan-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 65%; aspect-ratio: 1; border: 2px dashed rgba(255,255,255,0.6); border-radius: 12px; pointer-events: none; transition: border-color 0.2s, box-shadow 0.2s; }
-        .scan-overlay.flash { border-color: var(--color-success); box-shadow: 0 0 20px rgba(76,175,80,0.5); }
-        .status-bar { text-align: center; margin-top: 12px; }
-        .status-text { font-size: 14px; font-weight: 500; color: var(--color-text-secondary); }
-        .progress-wrap { margin-top: 12px; }
-        .progress-bar-outer { background: #e8e8e8; border-radius: 4px; overflow: hidden; height: 8px; }
-        .progress-bar-inner { height: 100%; background: var(--color-primary); border-radius: 4px; width: 0%; transition: width 0.2s; }
-        .progress-text { text-align: center; font-size: 13px; color: var(--color-text-secondary); margin-top: 6px; font-family: var(--font-mono); }
-        .chunk-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-        .chunk-tag { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 28px; border-radius: 4px; font-size: 12px; font-weight: 600; font-family: var(--font-mono); border: 1px solid var(--color-border); background: #f9f9f9; color: var(--color-text-secondary); transition: all 0.2s; }
-        .chunk-tag.collected { background: var(--color-success); color: #fff; border-color: var(--color-success); }
-        .controls { display: flex; justify-content: center; gap: 12px; margin-top: 12px; }
-        .btn { padding: 8px 24px; border: none; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.2s; }
-        .btn-primary { background: var(--color-primary); color: #fff; }
-        .btn-primary:hover { background: var(--color-primary-hover); }
-        .btn-secondary { background: #eee; color: var(--color-text); }
-        .btn-secondary:hover { background: #ddd; }
-        .result-section { display: none; }
-        .result-section.active { display: block; }
-        .result-stats { display: flex; gap: 24px; font-size: 13px; color: var(--color-text-secondary); margin-bottom: 12px; }
-        .result-stats .value { font-weight: 600; color: var(--color-text); font-family: var(--font-mono); }
-        .result-text { width: 100%; min-height: 120px; max-height: 300px; padding: 12px; border: 1px solid var(--color-border); border-radius: 6px; font-family: var(--font-sans); font-size: 13px; line-height: 1.6; resize: vertical; outline: none; background: #fafafa; }
-        .result-actions { margin-top: 12px; display: flex; gap: 12px; }
-        .toast { position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-100px); background: #333; color: #fff; padding: 10px 24px; border-radius: 6px; font-size: 14px; z-index: 9999; transition: transform 0.3s; pointer-events: none; }
-        .toast.show { transform: translateX(-50%) translateY(0); }
-        @media (max-width: 480px) { body { padding: 12px; } h1 { font-size: 18px; } }
-    </style>
-</head>
-<body>
-    <h1>&#x1F4F1; 动态流式二维码 v2.3 — 接收端</h1>
-    <div class="section">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0f3460" />
+    <link rel="manifest" href="manifest.json" />
+    <link rel="icon" href="icons/icon-192.png" />
+    <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="style.css" />
+    <title>动态流式二维码 2.7.1 · 接收</title>
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">屏幕 → 摄像头 · 离线传输</p>
+        <h1>接收内容 <small>2.7.1</small></h1>
+      </div>
+      <a href="../send/index.html">发送页 →</a>
+    </header>
+    <main>
+      <section aria-label="扫描二维码">
         <div class="camera-wrap">
-            <video id="video" playsinline autoplay muted></video>
-            <div class="scan-overlay" id="scanOverlay"></div>
+          <video
+            id="video"
+            playsinline
+            autoplay
+            muted
+            aria-label="摄像头预览"
+          ></video>
+          <div class="scan-overlay" id="scanOverlay"></div>
+          <span class="camera-label">保持二维码及四周白边完整可见</span>
         </div>
-        <div class="status-bar">
-            <div class="status-text" id="statusText">正在初始化...</div>
+        <p id="cameraInfo" class="hint"></p>
+        <div class="controls">
+          <button class="btn btn-primary" id="btnCamera">开始扫描</button
+          ><button class="btn btn-secondary" id="btnRetry">重新扫描</button
+          ><button class="btn btn-secondary" id="btnSwitchCam" disabled>
+            切换镜头</button
+          ><button class="btn btn-secondary" id="btnTorch" hidden>手电筒</button
+          ><button class="btn btn-secondary" id="btnSound" aria-pressed="false">
+            提示音：关
+          </button>
         </div>
-        <div class="progress-wrap">
-            <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressFill"></div></div>
-            <div class="progress-text" id="progressText">0</div>
+        <p id="statusText" class="status-text" role="status">点击开始扫描</p>
+        <div
+          class="progress-track"
+          id="progressBar"
+          role="progressbar"
+          aria-label="数据帧接收进度"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div id="progressFill"></div>
         </div>
-        <div class="chunk-grid" id="chunkGrid"></div>
-    </div>
-    <div class="section result-section" id="resultSection">
-        <div class="result-stats">
-            <span>字数：<span class="value" id="charResult">0</span></span>
-            <span>字节：<span class="value" id="byteResult">0</span></span>
+        <p id="progressText" class="progress-text">0 / 0</p>
+        <p id="missingText" class="hint"></p>
+        <p id="badFrames" class="hint"></p>
+        <div class="chunk-grid" id="chunkGrid" aria-label="帧接收状态"></div>
+      </section>
+      <section
+        class="result-section"
+        id="resultSection"
+        hidden
+        aria-labelledby="textTitle"
+      >
+        <h2 id="textTitle">文本已校验</h2>
+        <p class="result-stats">
+          <span id="charResult">0</span> 字符 · <span id="byteResult">0 B</span>
+        </p>
+        <label for="resultText" class="hint">接收原文</label
+        ><textarea class="result-text" id="resultText" readonly></textarea>
+        <div class="controls">
+          <button class="btn btn-primary" id="btnCopy">复制全文</button
+          ><button class="btn btn-secondary" id="btnSaveText">保存文本</button
+          ><button class="btn btn-secondary" id="btnReset">接收下一份</button>
         </div>
-        <textarea class="result-text" id="resultText" readonly></textarea>
-        <div class="result-actions">
-            <button class="btn btn-primary" id="btnCopy">复制全文</button>
-            <button class="btn btn-secondary" id="btnReset">重新扫描</button>
+      </section>
+      <section
+        class="result-section"
+        id="fileResultSection"
+        hidden
+        aria-labelledby="fileTitle"
+      >
+        <h2 id="fileTitle">文件已校验</h2>
+        <p class="file-name" id="fileName"></p>
+        <p class="hint" id="fileSize"></p>
+        <div class="controls">
+          <button class="btn btn-primary" id="btnDownload">下载文件</button
+          ><button class="btn btn-secondary" id="btnReset2">接收下一份</button>
         </div>
-    </div>
-    <div class="section result-section" id="fileResultSection">
-        <div class="result-stats">
-            <span>文件：<span class="value" id="fileName">-</span></span>
-            <span>大小：<span class="value" id="fileSize">-</span></span>
-        </div>
-        <div class="result-actions">
-            <button class="btn btn-primary" id="btnDownload">&#x2B07; 下载文件</button>
-            <button class="btn btn-secondary" id="btnReset2">重新扫描</button>
-        </div>
-    </div>
-    <div class="toast" id="toast"></div>
-
+      </section>
+      <aside class="guide">
+        <h3>接收提示</h3>
+        <p>
+          第一次使用需通过 HTTPS
+          加载完整接收页；缓存成功后可离线打开。普通局域网 HTTP
+          地址无法使用摄像头。
+        </p>
+        <p>
+          进度停住时保持对准，或把缺帧号输入电脑的“只播缺帧”。暂停和切换镜头会保留进度；重新扫描会清空当前传输。
+        </p>
+        <p id="offlineStatus" class="hint">
+          通过 HTTPS 或本机 localhost 可启用离线缓存
+        </p>
+      </aside>
+    </main>
+    <footer>动态流式二维码 2.7.1 · 不上传视频与接收内容</footer>
+    <div class="toast" id="toast" role="status"></div>
     <script src="jsQR.js"></script>
     <script src="pako.min.js"></script>
-    <script>
-    (function() {
-        'use strict';
-        var sharedEncoder = new TextEncoder();
-
-        // ---- v3 Header Parser ----
-        function parseHeader(payload) {
-            if (payload.length >= 13 && payload.charCodeAt(0) === 0x76 && payload.charCodeAt(1) === 0x33) {
-                var flags = payload.charCodeAt(2);
-                return {
-                    partNum: payload.charCodeAt(3) | (payload.charCodeAt(4) << 8),
-                    totalParts: payload.charCodeAt(5) | (payload.charCodeAt(6) << 8),
-                    totalChars: payload.charCodeAt(7) | (payload.charCodeAt(8) << 8)
-                             | (payload.charCodeAt(9) << 16) | (payload.charCodeAt(10) << 24),
-                    chunkBytes: payload.length - 13,
-                    compressed: (flags & 0x01) === 1,
-                    dataFrames: payload.charCodeAt(12),
-                    body: payload.substring(13)
-                };
-            }
-            return null;
-        }
-
-        // ---- State ----
-        var video = null, scanCanvas = null, scanCtx = null;
-        var processCanvas = null, processCtx = null;
-        var PROCESS_WIDTH = 1280;
-        var collected = {}, collectedCount = 0;
-        var totalParts = null, expectedTotalChars = null;
-        var isCompressed = false, dataFrames = null;
-        var isScanning = false;
-        var startTime = 0;
-
-        // ---- UI ----
-        function showToast(msg) {
-            var t = document.getElementById('toast');
-            t.textContent = msg; t.classList.add('show');
-            setTimeout(function() { t.classList.remove('show'); }, 2500);
-        }
-        function setStatus(text) { document.getElementById('statusText').textContent = text; }
-
-        function updateProgress() {
-            var pct = totalParts ? Math.round((collectedCount / totalParts) * 100) : 0;
-            document.getElementById('progressFill').style.width = pct + '%';
-            document.getElementById('progressText').textContent = collectedCount + (totalParts ? ' / ' + totalParts : '');
-            updateChunkGrid();
-        }
-
-        function updateChunkGrid() {
-            var grid = document.getElementById('chunkGrid');
-            grid.innerHTML = '';
-            var count = totalParts || collectedCount;
-            for (var i = 1; i <= count; i++) {
-                var span = document.createElement('span');
-                span.className = 'chunk-tag' + (collected[i] ? ' collected' : '');
-                span.textContent = i;
-                grid.appendChild(span);
-            }
-        }
-
-        function onNewFrameScanned() {
-            var overlay = document.getElementById('scanOverlay');
-            overlay.classList.add('flash');
-            setTimeout(function() { overlay.classList.remove('flash'); }, 200);
-            if (navigator.vibrate) navigator.vibrate(50);
-        }
-
-        function bodyToBytes(body) {
-            var bytes = new Uint8Array(body.length);
-            for (var i = 0; i < body.length; i++) bytes[i] = body.charCodeAt(i) & 0xFF;
-            return bytes;
-        }
-
-        function binaryDataToString(bytes) {
-            var s = '';
-            for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-            return s;
-        }
-
-        // ---- Scanner Init ----
-        function initScanner() {
-            scanCanvas = document.createElement('canvas');
-            scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
-            processCanvas = document.createElement('canvas');
-            processCtx = processCanvas.getContext('2d', { willReadFrequently: true });
-            var vw = video.videoWidth || 640;
-            var vh = video.videoHeight || 480;
-            scanCanvas.width = vw; scanCanvas.height = vh;
-            processCanvas.width = PROCESS_WIDTH;
-            processCanvas.height = Math.round(vh * (PROCESS_WIDTH / vw));
-        }
-
-        // ---- onFrameDecoded ----
-        function onFrameDecoded(parsed) {
-            if (parsed.partNum < 1 || collected[parsed.partNum]) return;
-            if (startTime === 0) startTime = Date.now();
-            collected[parsed.partNum] = bodyToBytes(parsed.body);
-            collectedCount++;
-            if (!totalParts || parsed.totalParts > totalParts) totalParts = parsed.totalParts;
-            if (parsed.totalChars > 0) expectedTotalChars = parsed.totalChars;
-            if (parsed.compressed) isCompressed = true;
-            if (parsed.dataFrames > 0) dataFrames = parsed.dataFrames;
-            onNewFrameScanned();
-            updateProgress();
-            // 收齐所有帧即可组装
-            if (totalParts && collectedCount >= totalParts) assembleAndShow();
-        }
-
-        // ---- Scan Loop ----
-        function scanFrame() {
-            if (!isScanning) return;
-            if (video.readyState >= video.HAVE_ENOUGH_DATA) {
-                scanCtx.drawImage(video, 0, 0);
-                processCtx.drawImage(scanCanvas, 0, 0, processCanvas.width, processCanvas.height);
-                var imageData = processCtx.getImageData(0, 0, processCanvas.width, processCanvas.height);
-                try {
-                    var result = jsQR(imageData.data, imageData.width, processCanvas.height, { inversionAttempts: 'attemptBoth' });
-                    if (result) {
-                        var rawText = '';
-                        if (result.binaryData && result.binaryData.length > 0) rawText = binaryDataToString(result.binaryData);
-                        else if (result.data) rawText = result.data;
-                        if (rawText) {
-                            var parsed = parseHeader(rawText);
-                            if (parsed && parsed.partNum >= 1) onFrameDecoded(parsed);
-                        }
-                    }
-                } catch (e) { /* skip */ }
-            }
-            requestAnimationFrame(scanFrame);
-        }
-
-        // ---- Assembly ----
-        function assembleAndShow() {
-            var k = dataFrames || totalParts;
-            var n = totalParts || k;
-
-            // 检查是否收齐
-            for (var i = 1; i <= n; i++) {
-                if (!collected[i]) {
-                    setStatus('已收到 ' + collectedCount + '/' + n + ' 帧，缺少第 ' + i + ' 帧，继续扫描...');
-                    return;
-                }
-            }
-
-            // 停止摄像头
-            isScanning = false;
-            var stream = video.srcObject;
-            if (stream) { stream.getTracks().forEach(function(t) { t.stop(); }); video.srcObject = null; }
-
-            // 拼接数据帧
-            var chunks = [], totalByteLen = 0;
-            for (var i = 1; i <= k; i++) { chunks.push(collected[i]); totalByteLen += collected[i].length; }
-            var combined = new Uint8Array(totalByteLen), offset = 0;
-            for (var i = 0; i < chunks.length; i++) { combined.set(chunks[i], offset); offset += chunks[i].length; }
-
-            setStatus('SHA-256 校验中...');
-
-            var formatSize = function(bytes) {
-                if (bytes < 1024) return bytes + ' B';
-                if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-                return (bytes / 1048576).toFixed(1) + ' MB';
-            };
-
-            var decompressAndShow = function(decompressedBytes) {
-                var statusEl = document.getElementById('statusText');
-                var elapsed = startTime > 0 ? (Date.now() - startTime) / 1000 : 0;
-                var totalBytes = combined.length;
-                var speed = elapsed > 0 ? (totalBytes / 1024 / elapsed).toFixed(1) : '-';
-                var summary = '✅ 完成！' + collectedCount + '/' + n + '帧 | '
-                    + (elapsed > 0 ? elapsed.toFixed(1) + '秒' : '-')
-                    + ' | ' + speed + ' KB/s';
-                statusEl.textContent = summary;
-                statusEl.style.color = 'var(--color-success)';
-
-                // 检测文件: 第1字节=文件名长度
-                var nameLen = decompressedBytes[0];
-                if (nameLen > 0 && nameLen < 255 && decompressedBytes.length > 1 + nameLen) {
-                    var nameBytes = decompressedBytes.slice(1, 1 + nameLen);
-                    var fileName = new TextDecoder('utf-8').decode(nameBytes);
-                    if (/^[\x20-\x7E\u4E00-\u9FFF\u3000-\u303F._\-()（）\[\]【】]+/.test(fileName)) {
-                        // 文件模式
-                        var fileContent = decompressedBytes.slice(1 + nameLen);
-                        document.getElementById('fileResultSection').classList.add('active');
-                        document.getElementById('resultSection').classList.remove('active');
-                        document.getElementById('fileName').textContent = fileName;
-                        document.getElementById('fileSize').textContent = formatSize(fileContent.length);
-                        document.getElementById('btnDownload').onclick = function() {
-                            var blob = new Blob([fileContent]);
-                            var url = URL.createObjectURL(blob);
-                            var a = document.createElement('a');
-                            a.href = url; a.download = fileName;
-                            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                            URL.revokeObjectURL(url);
-                        };
-                        if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]);
-                        return;
-                    }
-                }
-                // 文本模式
-                var finalText = new TextDecoder('utf-8').decode(decompressedBytes);
-                if (expectedTotalChars && finalText.length !== expectedTotalChars) {
-                    statusEl.textContent = '⚠️ 字数不匹配：预期 ' + expectedTotalChars + '，实际 ' + finalText.length;
-                    statusEl.style.color = 'var(--color-warning)';
-                }
-                document.getElementById('resultText').value = finalText;
-                document.getElementById('charResult').textContent = finalText.length.toLocaleString();
-                document.getElementById('byteResult').textContent = sharedEncoder.encode(finalText).length.toLocaleString();
-                document.getElementById('resultSection').classList.add('active');
-                document.getElementById('fileResultSection').classList.remove('active');
-                if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 100]);
-            };
-
-            if (isCompressed) {
-                if (combined.length < 33) { setStatus('⚠️ 数据过短'); return; }
-                var expectedHash = combined.slice(0, 32);
-                var compressedData = combined.slice(32);
-                crypto.subtle.digest('SHA-256', compressedData).then(function(hashBuffer) {
-                    var actualHash = new Uint8Array(hashBuffer);
-                    var match = true;
-                    for (var hi = 0; hi < 32; hi++) { if (expectedHash[hi] !== actualHash[hi]) { match = false; break; } }
-                    if (!match) { setStatus('⚠️ SHA-256 校验失败！数据可能已损坏'); return; }
-                    try {
-                        var decompressed = pako.ungzip(compressedData);
-                        decompressAndShow(decompressed);
-                    } catch (e) { setStatus('⚠️ 解压失败: ' + e.message); }
-                }).catch(function(e) { setStatus('⚠️ SHA-256 出错: ' + e.message); });
-            } else {
-                try { decompressAndShow(combined); }
-                catch (e) { setStatus('⚠️ 解码失败: ' + e.message); }
-            }
-        }
-
-        // ---- Copy ----
-        function copyText() {
-            var text = document.getElementById('resultText').value;
-            if (!text) return;
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(text).then(function() { showToast('已复制到剪贴板'); });
-            } else {
-                document.getElementById('resultText').select();
-                document.execCommand('copy');
-                showToast('已复制到剪贴板');
-            }
-        }
-
-        // ---- Camera ----
-        function startCamera() {
-            video = document.getElementById('video');
-            setStatus('正在请求摄像头权限...');
-            navigator.mediaDevices.getUserMedia({
-                video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-            }).then(function(stream) {
-                video.srcObject = stream;
-                video.setAttribute('playsinline', 'true');
-                video.play().then(function() {
-                    initScanner(); isScanning = true;
-                    setStatus('扫描中... 请将摄像头对准电脑屏幕');
-                    requestAnimationFrame(scanFrame);
-                });
-            }).catch(function(err) {
-                if (err.name === 'NotAllowedError') setStatus('❌ 摄像头权限被拒绝');
-                else if (err.name === 'NotFoundError') setStatus('❌ 未找到摄像头');
-                else setStatus('❌ 摄像头错误：' + err.message);
-            });
-        }
-
-        // ---- Reset ----
-        function resetScanner() {
-            isScanning = false;
-            if (video && video.srcObject) { video.srcObject.getTracks().forEach(function(t) { t.stop(); }); video.srcObject = null; }
-            collected = {}; collectedCount = 0;
-            totalParts = null; expectedTotalChars = null;
-            isCompressed = false; dataFrames = null;
-            startTime = 0;
-            document.getElementById('progressFill').style.width = '0%';
-            document.getElementById('progressText').textContent = '0';
-            document.getElementById('chunkGrid').innerHTML = '';
-            document.getElementById('resultSection').classList.remove('active');
-            document.getElementById('fileResultSection').classList.remove('active');
-            document.getElementById('resultText').value = '';
-            document.getElementById('statusText').style.color = '';
-            startCamera();
-        }
-
-        // ---- Init ----
-        document.addEventListener('DOMContentLoaded', function() {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                setStatus('❌ 当前浏览器不支持摄像头'); return;
-            }
-            document.getElementById('btnCopy').addEventListener('click', copyText);
-            document.getElementById('btnReset').addEventListener('click', resetScanner);
-            document.getElementById('btnReset2').addEventListener('click', resetScanner);
-            startCamera();
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register('./sw.js').catch(function() {});
-            }
-        });
-    })();
-    </script>
-</body>
+    <script src="../shared/protocol.js"></script>
+    <script src="../shared/capacity.js"></script>
+    <script src="../shared/transfer.js"></script>
+    <script src="app.js"></script>
+  </body>
 </html>

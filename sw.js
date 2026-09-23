@@ -1,60 +1,52 @@
-// 动态流式二维码 v2.3 — Service Worker for offline support
-var CACHE_NAME = 'recv-v2.3.1';
-var ASSETS = [
-    './',
-    './index.html',
-    './jsQR.js',
-    './pako.min.js',
-    './reed-solomon.js',
-    './manifest.json'
+// Cache names include scope: sibling releases cannot evict each other.
+const PREFIX = "qr27:" + self.registration.scope + ":";
+const CACHE = PREFIX + "2.7.1";
+const ASSETS = [
+  "./",
+  "./index.html",
+  "./app.js",
+  "./style.css",
+  "./jsQR.js",
+  "./pako.min.js",
+  "./manifest.json",
+  "./decoder.worker.js",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
+  "../shared/protocol.js",
+  "../shared/capacity.js",
+  "../shared/transfer.js",
+  "../shared/theme.css",
 ];
-
-// Install: pre-cache all assets
-self.addEventListener('install', function(event) {
-    event.waitUntil(
-        caches.open(CACHE_NAME).then(function(cache) {
-            return cache.addAll(ASSETS);
-        })
-    );
-    self.skipWaiting();
-});
-
-// Activate: clean up old caches
-self.addEventListener('activate', function(event) {
-    event.waitUntil(
-        caches.keys().then(function(names) {
-            return Promise.all(
-                names.filter(function(name) {
-                    return name !== CACHE_NAME;
-                }).map(function(name) {
-                    return caches.delete(name);
-                })
-            );
-        })
-    );
-    self.clients.claim();
-});
-
-// Fetch: cache-first strategy
-self.addEventListener('fetch', function(event) {
-    event.respondWith(
-        caches.match(event.request).then(function(cached) {
-            if (cached) return cached;
-            return fetch(event.request).then(function(response) {
-                // Cache successful GET responses
-                if (response && response.status === 200 && event.request.method === 'GET') {
-                    var clone = response.clone();
-                    caches.open(CACHE_NAME).then(function(cache) {
-                        cache.put(event.request, clone);
-                    });
-                }
-                return response;
-            });
-        }).catch(function() {
-            // Offline fallback: return cached index.html for navigation requests
-            if (event.request.mode === 'navigate') {
-                return caches.match('./index.html');
-            }
-        })
-    );
+const URLS = new Set(
+  ASSETS.map((path) => new URL(path, self.location.href).href),
+);
+self.addEventListener("install", (event) =>
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))),
+);
+// Let a running receiver finish on its current version; update on the next visit.
+self.addEventListener("activate", (event) =>
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names
+            .filter((name) => name.startsWith(PREFIX) && name !== CACHE)
+            .map((name) => caches.delete(name)),
+        ),
+      )
+      .then(() => self.clients.claim()),
+  ),
+);
+self.addEventListener("fetch", (event) => {
+  if (event.request.method !== "GET" || !URLS.has(event.request.url)) return;
+  event.respondWith(
+    caches.open(CACHE).then(async (cache) => {
+      const cached = await cache.match(event.request);
+      if (cached) return cached;
+      const response = await fetch(event.request);
+      if (response.ok) await cache.put(event.request, response.clone());
+      return response;
+    }),
+  );
 });
