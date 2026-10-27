@@ -1,5 +1,5 @@
 {
-  "name": "动态流式二维码 2.7.1 接收端",
+  "name": "动态流式二维码 2.7.2 接收端",
   "short_name": "流式二维码",
   "description": "扫描动态二维码，离线接收文本和文件",
   "display": "standalone",

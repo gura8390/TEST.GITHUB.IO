@@ -1,9 +1,18 @@
-/* Camera lifecycle and UI for the shared, bounded transfer collector. */
+/* Self-contained receiver: camera lifecycle and bounded transfer collector. */
 (function () {
   "use strict";
   const $ = (id) => document.getElementById(id),
-    T = QRTransfer,
-    collector = new T.Collector();
+    T = window.QRTransfer;
+  // bootstrap.js reports an actionable error if any local dependency failed.
+  if (
+    !T ||
+    !window.QRProtocol ||
+    !window.QRCapacity ||
+    !window.pako ||
+    !window.jsQR
+  )
+    return;
+  const collector = new T.Collector();
   let video,
     track = null,
     worker = null,
@@ -18,6 +27,7 @@
     progressAt = 0;
   let scanning = false,
     starting = false,
+    awaitingPlay = false,
     assembling = false,
     result = null,
     devices = [],
@@ -48,11 +58,13 @@
     $("btnCamera").disabled = starting || assembling;
     $("btnCamera").textContent = starting
       ? "正在打开…"
-      : scanning
-        ? "暂停扫描"
-        : collector.meta
-          ? "继续扫描"
-          : "开始扫描";
+      : awaitingPlay
+        ? "点击继续扫描"
+        : scanning
+          ? "暂停扫描"
+          : collector.meta
+            ? "继续扫描"
+            : "开始扫描";
     $("btnSwitchCam").disabled = !scanning || devices.length < 2;
     $("btnRetry").disabled = starting || assembling;
   }
@@ -143,9 +155,12 @@
     ++cameraEpoch;
     scanning = false;
     starting = false;
+    awaitingPlay = false;
     clearTimeout(scanTimer);
-    if (videoCallback !== null && video?.cancelVideoFrameCallback)
-      video.cancelVideoFrameCallback(videoCallback);
+    if (videoCallback !== null && video && video.cancelVideoFrameCallback)
+      try {
+        video.cancelVideoFrameCallback(videoCallback);
+      } catch (error) {}
     videoCallback = null;
     scanBusy = false;
     lastVideoTime = -1;
@@ -354,10 +369,14 @@
           scanSize.height = video.videoHeight;
           roi = null;
         }
-        let crop = roi;
-        if (!crop && detector) {
+        // Repeated successful reads of the same frames must not pin us to a
+        // crop/scale that never decodes the remaining frame.
+        const stalled =
+          collector.updated && Date.now() - collector.updated > 1500;
+        let crop = stalled ? null : roi;
+        if (!crop && detector && !stalled) {
           try {
-            const codes = await detector.detect(video);
+            const codes = await withTimeout(detector.detect(video), 250);
             if (epoch !== cameraEpoch || !scanning) return;
             if (codes[0] && codes[0].cornerPoints)
               crop = around(codes[0].cornerPoints);
@@ -367,7 +386,7 @@
           }
         }
         if (!crop) {
-          const ratio = misses < 10 ? 0.8 : 1;
+          const ratio = !stalled && misses < 10 ? 0.8 : 1;
           crop = bounds({
             x: (scanSize.width * (1 - ratio)) / 2,
             y: (scanSize.height * (1 - ratio)) / 2,
@@ -378,7 +397,7 @@
         crop = bounds(crop);
         const scale = Math.min(
           1,
-          (misses >= 12
+          (stalled || misses >= 12
             ? 1280
             : knownVersion
               ? Math.ceil((17 + knownVersion * 4) * 1.4 * 5) *
@@ -446,33 +465,122 @@
   }
   function scheduleScan(epoch) {
     if (epoch !== cameraEpoch || !scanning) return;
-    if (typeof video.requestVideoFrameCallback === "function") {
-      videoCallback = video.requestVideoFrameCallback(() => {
-        if (epoch !== cameraEpoch || !scanning) return;
-        videoCallback = null;
-        scheduleScan(epoch);
-        // One decode in flight: process the newest camera frame, never build a queue.
-        if (!scanBusy) {
-          scanBusy = true;
-          scan(epoch).finally(() => {
-            if (epoch === cameraEpoch) scanBusy = false;
-          });
-        }
+    let lastCallbackAt = -Infinity;
+    function scanLatest() {
+      if (epoch !== cameraEpoch || !scanning || scanBusy) return;
+      if (video.readyState < 2 || video.currentTime === lastVideoTime) return;
+      lastVideoTime = video.currentTime;
+      scanBusy = true;
+      scan(epoch).finally(() => {
+        if (epoch === cameraEpoch) scanBusy = false;
       });
-    } else {
-      scanTimer = setTimeout(
-        async () => {
-          if (epoch !== cameraEpoch || !scanning) return;
-          const stamp = video.currentTime;
-          if (stamp !== lastVideoTime) {
-            lastVideoTime = stamp;
-            await scan(epoch);
-          }
-          scheduleScan(epoch);
-        },
-        collector.meta ? 4 : 40,
-      );
     }
+    function nextVideoFrame() {
+      if (epoch !== cameraEpoch || !scanning) return;
+      if (typeof video.requestVideoFrameCallback !== "function") return;
+      try {
+        videoCallback = video.requestVideoFrameCallback(() => {
+          if (epoch !== cameraEpoch || !scanning) return;
+          videoCallback = null;
+          lastCallbackAt = performance.now();
+          nextVideoFrame();
+          scanLatest();
+        });
+      } catch (error) {
+        videoCallback = null;
+      }
+    }
+    function watchdog() {
+      if (epoch !== cameraEpoch || !scanning) return;
+      // Some mobile engines expose rVFC but stop delivering callbacks. A stalled
+      // callback must not stop decoding a video whose currentTime still advances.
+      const callbackActive = performance.now() - lastCallbackAt < 250;
+      if (!callbackActive) scanLatest();
+      scanTimer = setTimeout(watchdog, callbackActive ? 250 : 16);
+    }
+    nextVideoFrame();
+    watchdog();
+  }
+  function withTimeout(promise, ms) {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("操作超时")), ms);
+      }),
+    ]).finally(() => clearTimeout(timer));
+  }
+  function trackInfo(method) {
+    try {
+      return track && track[method] ? track[method]() : {};
+    } catch (error) {
+      return {};
+    }
+  }
+  async function playCamera(epoch) {
+    // Invoke play() immediately, including when retried from a user gesture.
+    starting = true;
+    awaitingPlay = false;
+    controls();
+    try {
+      await withTimeout(video.play(), 8000);
+    } catch (error) {
+      if (epoch !== cameraEpoch) return;
+      starting = false;
+      awaitingPlay = true;
+      controls();
+      status("摄像头已授权，浏览器尚未播放画面。请点“点击继续扫描”。");
+      return;
+    }
+    if (epoch !== cameraEpoch) return;
+    const caps = trackInfo("getCapabilities");
+    $("btnTorch").hidden = !caps.torch;
+    if (caps.focusMode && caps.focusMode.includes("continuous")) {
+      try {
+        Promise.resolve(
+          track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }),
+        ).catch(() => {});
+      } catch (error) {}
+    }
+    const settings = trackInfo("getSettings");
+    $("cameraInfo").textContent =
+      (settings.width || video.videoWidth) +
+      " × " +
+      (settings.height || video.videoHeight) +
+      (settings.frameRate
+        ? " · 相机 " + Math.round(settings.frameRate) + " FPS"
+        : "");
+    scanSize = { width: 0, height: 0 };
+    processCanvas = document.createElement("canvas");
+    processCtx = processCanvas.getContext("2d", { willReadFrequently: true });
+    makeWorker();
+    if ("BarcodeDetector" in window)
+      try {
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+      } catch (error) {
+        detector = null;
+      }
+    scanning = true;
+    starting = false;
+    controls();
+    status("扫描中，请对准二维码");
+    scheduleScan(epoch);
+    // Camera enumeration is optional and may never settle in embedded browsers.
+    // Start decoding first; only enable switching when enumeration succeeds.
+    try {
+      if (navigator.mediaDevices.enumerateDevices)
+        navigator.mediaDevices
+          .enumerateDevices()
+          .then((list) => {
+            if (epoch !== cameraEpoch) return;
+            devices = list.filter((d) => d.kind === "videoinput");
+            deviceIndex = devices.findIndex(
+              (d) => d.deviceId === settings.deviceId,
+            );
+            controls();
+          })
+          .catch(() => {});
+    } catch (error) {}
   }
   function cameraError(error) {
     const names = {
@@ -532,54 +640,14 @@
       }
       video.srcObject = stream;
       track = stream.getVideoTracks()[0];
-      await video.play();
-      if (epoch !== cameraEpoch) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
-      const caps = track.getCapabilities ? track.getCapabilities() : {};
-      $("btnTorch").hidden = !caps.torch;
-      if (caps.focusMode && caps.focusMode.includes("continuous"))
-        track
-          .applyConstraints({ advanced: [{ focusMode: "continuous" }] })
-          .catch(() => {});
-      if (navigator.mediaDevices.enumerateDevices)
-        try {
-          const list = await navigator.mediaDevices.enumerateDevices();
-          if (epoch !== cameraEpoch) return;
-          devices = list.filter((d) => d.kind === "videoinput");
-          const actual = track.getSettings().deviceId;
-          deviceIndex = devices.findIndex((d) => d.deviceId === actual);
-        } catch (error) {}
-      const settings = track.getSettings ? track.getSettings() : {};
-      $("cameraInfo").textContent =
-        (settings.width || video.videoWidth) +
-        " × " +
-        (settings.height || video.videoHeight) +
-        (settings.frameRate
-          ? " · 相机 " + Math.round(settings.frameRate) + " FPS"
-          : "");
-      scanSize = { width: 0, height: 0 };
-      processCanvas = document.createElement("canvas");
-      processCtx = processCanvas.getContext("2d", { willReadFrequently: true });
-      makeWorker();
-      if ("BarcodeDetector" in window)
-        try {
-          detector = new BarcodeDetector({ formats: ["qr_code"] });
-        } catch (error) {
-          detector = null;
-        }
+      if (!track) throw new Error("摄像头未提供视频轨道");
       track.onended = () => {
         if (epoch === cameraEpoch) {
           stopCamera();
           status("摄像头已断开，已保留接收进度");
         }
       };
-      scanning = true;
-      starting = false;
-      controls();
-      status("扫描中，请对准二维码");
-      scheduleScan(epoch);
+      await playCamera(epoch);
     } catch (error) {
       if (epoch === cameraEpoch) {
         stopCamera();
@@ -622,10 +690,17 @@
   }
   document.addEventListener("DOMContentLoaded", () => {
     video = $("video");
+    video.muted = true;
+    video.playsInline = true;
     $("btnCamera").onclick = () => {
       if (scanning) {
         stopCamera();
         status("已暂停，接收进度保留");
+      } else if (awaitingPlay) {
+        playCamera(cameraEpoch).catch((error) => {
+          stopCamera();
+          cameraError(error);
+        });
       } else startCamera();
     };
     $("btnRetry").onclick = reset;
@@ -676,7 +751,7 @@
       }
     };
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && (scanning || starting)) {
+      if (document.hidden && (scanning || starting || awaitingPlay)) {
         stopCamera();
         status("页面进入后台，摄像头已关闭；可继续扫描");
       }
@@ -704,6 +779,7 @@
         });
     progress(true);
     controls();
-    status("点击开始扫描，允许摄像头后对准电脑屏幕");
+    window.__receiverReady = true;
+    startCamera();
   });
 })();

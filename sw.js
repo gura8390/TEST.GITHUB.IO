@@ -1,10 +1,11 @@
 // Cache names include scope: sibling releases cannot evict each other.
 const PREFIX = "qr27:" + self.registration.scope + ":";
-const CACHE = PREFIX + "2.7.1";
+const CACHE = PREFIX + "2.7.2";
 const ASSETS = [
   "./",
   "./index.html",
   "./app.js",
+  "./bootstrap.js",
   "./style.css",
   "./jsQR.js",
   "./pako.min.js",
@@ -12,18 +13,24 @@ const ASSETS = [
   "./decoder.worker.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
-  "../shared/protocol.js",
-  "../shared/capacity.js",
-  "../shared/transfer.js",
-  "../shared/theme.css",
+  "./protocol.js",
+  "./capacity.js",
+  "./transfer.js",
+  "./theme.css",
 ];
 const URLS = new Set(
   ASSETS.map((path) => new URL(path, self.location.href).href),
 );
 self.addEventListener("install", (event) =>
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(ASSETS))),
+  event.waitUntil(
+    caches
+      .open(CACHE)
+      .then((cache) => cache.addAll(ASSETS))
+      .then(() => self.skipWaiting()),
+  ),
 );
-// Let a running receiver finish on its current version; update on the next visit.
+// Activate refreshed assets without reloading a running transfer. The next reload
+// uses the new complete cache even when another old receiver tab stays open.
 self.addEventListener("activate", (event) =>
   event.waitUntil(
     caches

@@ -6,17 +6,16 @@
     <meta name="theme-color" content="#0f3460" />
     <link rel="manifest" href="manifest.json" />
     <link rel="icon" href="icons/icon-192.png" />
-    <link rel="stylesheet" href="../shared/theme.css" />
+    <link rel="stylesheet" href="./theme.css" />
     <link rel="stylesheet" href="style.css" />
-    <title>动态流式二维码 2.7.1 · 接收</title>
+    <title>动态流式二维码 2.7.2 · 接收</title>
   </head>
   <body>
     <header class="page-header">
       <div>
         <p class="eyebrow">屏幕 → 摄像头 · 离线传输</p>
-        <h1>接收内容 <small>2.7.1</small></h1>
+        <h1>接收内容 <small>2.7.2</small></h1>
       </div>
-      <a href="../send/index.html">发送页 →</a>
     </header>
     <main>
       <section aria-label="扫描二维码">
@@ -42,7 +41,9 @@
             提示音：关
           </button>
         </div>
-        <p id="statusText" class="status-text" role="status">点击开始扫描</p>
+        <p id="statusText" class="status-text" role="status">
+          正在启动接收程序…
+        </p>
         <div
           class="progress-track"
           id="progressBar"
@@ -94,7 +95,7 @@
       <aside class="guide">
         <h3>接收提示</h3>
         <p>
-          第一次使用需通过 HTTPS
+          打开后会自动请求摄像头权限，允许后立即扫描。第一次使用需通过 HTTPS
           加载完整接收页；缓存成功后可离线打开。普通局域网 HTTP
           地址无法使用摄像头。
         </p>
@@ -106,13 +107,14 @@
         </p>
       </aside>
     </main>
-    <footer>动态流式二维码 2.7.1 · 不上传视频与接收内容</footer>
+    <footer>动态流式二维码 2.7.2 · 不上传视频与接收内容</footer>
     <div class="toast" id="toast" role="status"></div>
+    <script src="bootstrap.js"></script>
     <script src="jsQR.js"></script>
     <script src="pako.min.js"></script>
-    <script src="../shared/protocol.js"></script>
-    <script src="../shared/capacity.js"></script>
-    <script src="../shared/transfer.js"></script>
+    <script src="./protocol.js"></script>
+    <script src="./capacity.js"></script>
+    <script src="./transfer.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

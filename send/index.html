@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>动态流式二维码 2.7.2 · 发送</title>
+    <link rel="icon" href="icon.png" />
+    <link rel="stylesheet" href="./theme.css" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">屏幕 → 摄像头 · 离线传输</p>
+        <h1>动态流式二维码 <small>2.7.2</small></h1>
+      </div>
+    </header>
+    <main class="workspace">
+      <section class="input-panel" id="inputPanel" aria-labelledby="inputTitle">
+        <div class="section-heading">
+          <h2 id="inputTitle">准备发送</h2>
+          <span class="muted">文本 / 单个文件</span>
+        </div>
+        <label for="inputText">文本内容</label
+        ><textarea
+          id="inputText"
+          data-lock
+          spellcheck="false"
+          placeholder="在这里粘贴文本，也可以拖入文件"
+        ></textarea>
+        <p class="hint">
+          保留空格、换行和 Unicode 字符；不自动清理或改写内容。
+        </p>
+        <div class="file-input-row">
+          <button class="btn btn-secondary" id="btnChooseFile" data-lock>
+            选择文件</button
+          ><input type="file" id="fileInput" hidden data-lock /><button
+            class="btn btn-secondary"
+            id="btnClearFile"
+            hidden
+            data-lock
+          >
+            移除文件
+          </button>
+        </div>
+        <p id="fileInfo" class="file-info"></p>
+        <dl class="stats">
+          <div>
+            <dt>字符</dt>
+            <dd id="charCount">0</dd>
+          </div>
+          <div>
+            <dt>原始大小</dt>
+            <dd id="byteCount">0 B</dd>
+          </div>
+          <div>
+            <dt>压缩后</dt>
+            <dd id="compressedSize">—</dd>
+          </div>
+          <div>
+            <dt>二维码</dt>
+            <dd id="versionDisplay">—</dd>
+          </div>
+          <div class="wide">
+            <dt>预计帧数</dt>
+            <dd id="codeCount">—</dd>
+          </div>
+        </dl>
+        <div class="settings">
+          <label
+            >二维码版本<select id="versionSelect" data-lock>
+              <option value="auto">自动 · 均衡提速</option>
+              <option value="10">V10</option>
+              <option value="15">V15</option>
+              <option value="20">V20</option>
+              <option value="25">V25</option>
+              <option value="30">V30</option>
+              <option value="40">V40</option>
+            </select></label
+          >
+          <label
+            >纠错能力<select id="eccSelect" data-lock>
+              <option value="L">L · 容量优先</option>
+              <option value="M">M · 抗扰优先</option>
+            </select></label
+          >
+          <label
+            >发送速度<select id="fpsSelect">
+              <option value="5">5 FPS · 慢速</option>
+              <option value="10" selected>10 FPS</option>
+              <option value="15">15 FPS</option>
+              <option value="20">20 FPS</option>
+              <option value="25">25 FPS</option>
+              <option value="30">30 FPS · 需实测</option>
+            </select></label
+          >
+          <label
+            >显示尺寸<select id="sizeSelect">
+              <option value="2">2 px</option>
+              <option value="4" selected>4 px</option>
+              <option value="6">6 px</option>
+              <option value="8">8 px</option>
+            </select></label
+          >
+          <label
+            >接收端兼容<select id="protoSelect" data-lock>
+              <option value="v4">v4 · 2.5 及以上</option>
+              <option value="v3">v3 · 2.3 / 2.4</option>
+            </select></label
+          ><label class="check"
+            ><input
+              type="checkbox"
+              id="parityCheck"
+              checked
+              data-lock
+            />附加缺帧恢复码</label
+          >
+        </div>
+        <p class="hint" id="inputStatus" role="status">粘贴文本或选择文件。</p>
+        <div class="actions">
+          <button class="btn btn-primary" id="btnGenerate" disabled>
+            开始发送</button
+          ><button class="btn btn-secondary" id="btnCancel" hidden>
+            取消生成
+          </button>
+        </div>
+        <div class="progress-track" id="progressContainer" hidden>
+          <div id="progressFill"></div>
+        </div>
+      </section>
+      <section
+        class="display-area"
+        id="displayArea"
+        aria-labelledby="displayTitle"
+      >
+        <div class="section-heading">
+          <h2 id="displayTitle">对准这里接收</h2>
+          <span class="muted">光信号传输</span>
+        </div>
+        <div class="display-canvas-wrap" id="displayCanvasWrap">
+          <canvas
+            id="displayCanvas"
+            hidden
+            aria-label="当前传输二维码"
+          ></canvas>
+          <div id="emptyState">
+            <span class="empty-marker">QR</span>
+            <p>内容准备好后，点击开始发送</p>
+            <p class="hint">二维码将在这里循环播放</p>
+          </div>
+        </div>
+        <div class="frame-indicator" id="frameIndicator">等待开始</div>
+        <p id="statusText" role="status">就绪</p>
+        <div class="display-controls">
+          <button class="btn btn-secondary" id="btnPrev" disabled>上一帧</button
+          ><button class="btn btn-primary" id="btnPause" disabled>暂停</button
+          ><button class="btn btn-secondary" id="btnNext" disabled>
+            下一帧</button
+          ><button class="btn btn-secondary" id="btnStop" disabled>停止</button
+          ><button class="btn btn-secondary" id="btnFullscreen" disabled>
+            全屏
+          </button>
+        </div>
+        <div class="repair-row">
+          <label for="repairInput">只缺几帧？输入手机提示的帧号</label>
+          <div class="actions">
+            <input id="repairInput" placeholder="例如 3, 8, 12" /><button
+              class="btn btn-secondary"
+              id="btnRepair"
+              disabled
+            >
+              只播缺帧
+            </button>
+          </div>
+        </div>
+        <aside class="guide">
+          <h3>手机接收步骤</h3>
+          <ol>
+            <li>打开接收页，允许自动请求的摄像头权限后即可扫描。</li>
+            <li>对准二维码，保持整张码及白边清晰可见。</li>
+            <li>等手机显示校验完成，再复制文本或下载文件。</li>
+          </ol>
+          <p class="hint">
+            扫不动时先降至 5～10 FPS、增大显示尺寸。手机接收页需要 HTTPS
+            或设备本机 localhost；普通局域网 HTTP 地址无法请求摄像头。
+          </p>
+        </aside>
+      </section>
+    </main>
+    <footer>
+      QR 2.7.2 · 内容仅在收发设备处理 · 原始内容上限 16
+      MB，实际容量取决于压缩结果
+    </footer>
+    <div class="toast" id="toast" role="status"></div>
+    <script src="qrcode.js"></script>
+    <script src="pako.min.js"></script>
+    <script src="./protocol.js"></script>
+    <script src="./capacity.js"></script>
+    <script src="./transfer.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
